@@ -3,6 +3,10 @@ import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from 
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
 import { parsePolygon } from "./polygon";
+import { DEFAULT_MOUNT } from "./transform";
+import { type Units, defaultUnits } from "./units";
+import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import "./zone-map";
 
 declare const __VERSION__: string;
 
@@ -32,6 +36,7 @@ export class Ld2450ZoneCard extends LitElement {
     _deviceId: { state: true },
     _zoneId: { state: true },
     _entityIdParts: { state: true },
+    _userSettings: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -39,6 +44,7 @@ export class Ld2450ZoneCard extends LitElement {
   private _deviceId?: string;
   private _zoneId?: string;
   private _entityIdParts?: EntityNameType[];
+  private _userSettings?: UserSettings;
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -67,6 +73,21 @@ export class Ld2450ZoneCard extends LitElement {
       this._entityIdParts = [];
       fetchEntityIdParts(this.hass).then((parts) => (this._entityIdParts = parts));
     }
+    if (this.hass !== undefined && this._userSettings === undefined) {
+      this._userSettings = {};
+      fetchUserSettings(this.hass).then((settings) => (this._userSettings = { ...settings, ...this._userSettings }));
+    }
+  }
+
+  private get _units(): Units {
+    return this._userSettings?.units ?? defaultUnits(this.hass?.config?.unit_system?.length);
+  }
+
+  private _setUnits(units: Units): void {
+    this._userSettings = { ...this._userSettings, units };
+    saveUserSettings(this.hass!, this._userSettings).catch((err) =>
+      console.warn("ld2450-zone-card: could not save user settings", err),
+    );
   }
 
   override render() {
@@ -112,7 +133,21 @@ export class Ld2450ZoneCard extends LitElement {
           </select>
         </label>
       </div>
-      ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}
+      <div class="toolbar">
+        <div class="segmented" role="group" aria-label="Units">
+          ${(["metric", "imperial"] as const).map(
+            (u) =>
+              html`<button aria-pressed=${String(this._units === u)} @click=${() => this._setUnits(u)}>
+                ${u === "metric" ? "Metric" : "Imperial"}
+              </button>`,
+          )}
+        </div>
+      </div>
+      <ld2450-zone-map .mount=${DEFAULT_MOUNT} .units=${this._units}></ld2450-zone-map>
+      <details>
+        <summary>Entities</summary>
+        ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}
+      </details>
       ${
         device.warnings.length === 0
           ? nothing
@@ -178,6 +213,40 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   static override styles = css`
+    .toolbar {
+      display: flex;
+      justify-content: flex-end;
+      margin: 12px 0 8px;
+    }
+    .segmented {
+      display: inline-flex;
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .segmented button {
+      padding: 4px 12px;
+      font: inherit;
+      font-size: 0.85em;
+      color: var(--primary-text-color);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+    .segmented button + button {
+      border-left: 1px solid var(--divider-color);
+    }
+    .segmented button[aria-pressed="true"] {
+      color: var(--text-primary-color);
+      background: var(--primary-color);
+    }
+    details {
+      margin-top: 12px;
+    }
+    summary {
+      cursor: pointer;
+      color: var(--secondary-text-color);
+    }
     .selectors {
       display: flex;
       flex-wrap: wrap;

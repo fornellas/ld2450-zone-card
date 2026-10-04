@@ -12,7 +12,13 @@ interface MockEntity {
 }
 
 function mockHass(devices: Record<string, string>, entities: MockEntity[]): HomeAssistant {
-  const hass: HomeAssistant = { states: {}, entities: {}, devices: {}, callWS: () => Promise.reject(new Error()) };
+  const hass: HomeAssistant = {
+    states: {},
+    entities: {},
+    devices: {},
+    config: { unit_system: { length: "km" } },
+    callWS: () => Promise.reject(new Error()),
+  };
   for (const [id, name] of Object.entries(devices)) {
     hass.devices[id] = { id, name, name_by_user: null };
   }

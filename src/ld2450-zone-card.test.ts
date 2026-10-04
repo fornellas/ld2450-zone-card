@@ -5,7 +5,10 @@ import "./ld2450-zone-card";
 import type { Ld2450ZoneCard } from "./ld2450-zone-card";
 import { POLYGON_PATTERN } from "./polygon";
 
+let calls: { type: string; [key: string]: unknown }[] = [];
+
 function hass(): HomeAssistant {
+  calls = [];
   const states: HomeAssistant["states"] = {};
   const entities: HomeAssistant["entities"] = {};
   const add = (entity_id: string, state: string, attributes: Record<string, unknown>) => {
@@ -20,7 +23,15 @@ function hass(): HomeAssistant {
     states,
     entities,
     devices: { dev1: { id: "dev1", name: "Office", name_by_user: null } },
-    callWS: <T>() => Promise.resolve({ entity_id_parts: ["area", "device", "entity"] } as T),
+    config: { unit_system: { length: "km" } },
+    callWS: <T>(msg: { type: string; [key: string]: unknown }) => {
+      calls.push(msg);
+      if (msg.type === "config/entity_registry/settings/get") {
+        return Promise.resolve({ entity_id_parts: ["area", "device", "entity"] } as T);
+      }
+      if (msg.type === "frontend/get_user_data") return Promise.resolve({ value: null } as T);
+      return Promise.resolve(null as T);
+    },
   };
 }
 
@@ -58,6 +69,25 @@ describe("ld2450-zone-card", () => {
   it("explains when nothing is found", async () => {
     const root = await renderCard({}, { ...hass(), states: {}, entities: {} });
     expect(root.textContent).toContain("No LD2450 polygon zones found");
+  });
+
+  it("draws the map and switches units per user", async () => {
+    const root = await renderCard({}, hass());
+    const map = root.querySelector("ld2450-zone-map")!;
+    await (map as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+    expect(map.shadowRoot!.querySelector("polygon.area")).not.toBeNull();
+    expect(map.shadowRoot!.textContent).toContain("2 m");
+
+    const imperial = [...root.querySelectorAll(".segmented button")].find((b) => b.textContent?.includes("Imperial"));
+    (imperial as HTMLButtonElement).click();
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    await (map as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+    expect(map.shadowRoot!.textContent).toContain("10 ft");
+    expect(calls).toContainEqual({
+      type: "frontend/set_user_data",
+      key: "ld2450_zone_card",
+      value: { units: "imperial" },
+    });
   });
 
   it("rejects invalid config", () => {
