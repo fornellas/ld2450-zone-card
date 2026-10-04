@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+      # HACS installs the release asset named after the repository
+      - run: gh release upload "${{ github.event.release.tag_name }}" dist/ld2450-zone-card.js --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
