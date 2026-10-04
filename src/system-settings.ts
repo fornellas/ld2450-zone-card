@@ -18,11 +18,13 @@ const isPoint = (v: unknown): v is Point =>
 
 /** The device's mount, or the default when it's missing or malformed. */
 export function deviceMount(settings: SystemSettings | undefined, deviceId: string): Mount {
-  const m = settings?.mounts?.[deviceId] as Partial<Mount> | undefined;
-  if (m === undefined || typeof m.upsideDown !== "boolean" || !isNumber(m.rotation) || !isPoint(m.offset)) {
-    return DEFAULT_MOUNT;
-  }
-  return { upsideDown: m.upsideDown, rotation: m.rotation, offset: { x: m.offset.x, y: m.offset.y } };
+  const m = settings?.mounts?.[deviceId] as (Partial<Mount> & { upsideDown?: unknown }) | undefined;
+  if (m === undefined || !isNumber(m.rotation) || !isPoint(m.offset)) return DEFAULT_MOUNT;
+  // v0.0.8 stored "upsideDown", which showed the radar's x as-is when set
+  const invertX =
+    typeof m.invertX === "boolean" ? m.invertX : typeof m.upsideDown === "boolean" ? !m.upsideDown : undefined;
+  if (invertX === undefined) return DEFAULT_MOUNT;
+  return { invertX, rotation: m.rotation, offset: { x: m.offset.x, y: m.offset.y } };
 }
 
 export function withDeviceMount(settings: SystemSettings, deviceId: string, mount: Mount): SystemSettings {

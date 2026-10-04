@@ -2,6 +2,15 @@ import { LitElement, css, html, svg } from "lit";
 import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
 import type { Point } from "./polygon";
 import type { TargetPosition } from "./targets";
+
+/** A polygon zone to draw, in radar coordinates. */
+export interface MapZone {
+  name: string;
+  points: Point[];
+  selected: boolean;
+  /** Whether its presence sensor is on. */
+  occupied: boolean;
+}
 import { DEFAULT_MOUNT, type Mount, toRoom } from "./transform";
 import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
@@ -42,11 +51,13 @@ export class Ld2450ZoneMap extends LitElement {
     mount: { attribute: false },
     units: { attribute: false },
     targets: { attribute: false },
+    zones: { attribute: false },
   };
 
   mount: Mount = DEFAULT_MOUNT;
   units: Units = "metric";
   targets: TargetPosition[] = [];
+  zones: MapZone[] = [];
 
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
@@ -69,11 +80,13 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderGrid(view, font)}
         <polygon class="bounds" points=${pointsAttr(bounds)}></polygon>
         <polygon class="area" points=${pointsAttr(area)}></polygon>
-        ${this._renderRadar()} ${this._renderTargets(font)}
+        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTargets(font)}
       </svg>
       <div class="legend">
         <span><i class="swatch area"></i>Tracking range</span>
         <span><i class="swatch bounds"></i>Zone point limits</span>
+        <span><i class="swatch zone"></i>Zones</span>
+        <span><i class="swatch occupied"></i>Occupied</span>
         <span><i class="swatch target"></i>Targets</span>
       </div>
       <div class="readout">
@@ -126,6 +139,30 @@ export class Ld2450ZoneMap extends LitElement {
           <circle cx=${p.x} cy=${-p.y} r=${TARGET_RADIUS}></circle>
           <text x=${p.x} y=${-p.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
             ${t.label}
+          </text>
+        </g>
+      `;
+    });
+  }
+
+  private _renderZones(font: number) {
+    // The selected zone goes last, so it's drawn on top
+    const zones = [...this.zones]
+      .filter((z) => z.points.length > 0)
+      .sort((a, b) => Number(a.selected) - Number(b.selected));
+    return zones.map((zone) => {
+      const points = zone.points.map((p) => toRoom(p, this.mount));
+      const center = {
+        x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+        y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+      };
+      const classes = ["zone", zone.selected ? "selected" : "", zone.occupied ? "occupied" : ""].join(" ");
+      return svg`
+        <g class=${classes}>
+          <title>${zone.name}${zone.occupied ? " (occupied)" : ""}</title>
+          <polygon points=${pointsAttr(points)}></polygon>
+          <text x=${center.x} y=${-center.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
+            ${zone.name}
           </text>
         </g>
       `;
@@ -197,6 +234,35 @@ export class Ld2450ZoneMap extends LitElement {
       stroke: var(--primary-text-color);
       stroke-width: 2;
     }
+    .zone polygon {
+      fill: var(--secondary-text-color);
+      fill-opacity: 0.08;
+      stroke: var(--secondary-text-color);
+      stroke-width: 1.5;
+      stroke-dasharray: 6 4;
+    }
+    .zone text {
+      fill: var(--secondary-text-color);
+    }
+    .zone.occupied polygon {
+      fill: var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800));
+      fill-opacity: 0.3;
+    }
+    .zone.selected polygon {
+      fill: var(--primary-color);
+      fill-opacity: 0.25;
+      stroke: var(--primary-color);
+      stroke-width: 2.5;
+      stroke-dasharray: none;
+    }
+    .zone.selected.occupied polygon {
+      fill: var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800));
+      fill-opacity: 0.4;
+    }
+    .zone.selected text {
+      fill: var(--primary-text-color);
+      font-weight: 500;
+    }
     .target circle {
       fill: var(--accent-color, #ff9800);
       stroke: var(--card-background-color, #fff);
@@ -239,6 +305,18 @@ export class Ld2450ZoneMap extends LitElement {
       width: 10px;
       border-radius: 50%;
       background: var(--accent-color, #ff9800);
+    }
+    .swatch.zone {
+      background: color-mix(in srgb, var(--primary-color) 25%, transparent);
+      border: 2px solid var(--primary-color);
+    }
+    .swatch.occupied {
+      background: color-mix(
+        in srgb,
+        var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800)) 40%,
+        transparent
+      );
+      border: 1px solid var(--secondary-text-color);
     }
     .swatch.bounds {
       border: 1px dashed var(--secondary-text-color);

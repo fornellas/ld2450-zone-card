@@ -100,7 +100,13 @@ describe("ld2450-zone-card", () => {
     expect(map.shadowRoot!.querySelector("polygon.area")).not.toBeNull();
     expect(map.shadowRoot!.textContent).toContain("2 m");
     expect(map.shadowRoot!.querySelectorAll("g.target")).toHaveLength(1);
-    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x 0.78 m, y 1.71 m");
+    // The couch zone has a polygon and is occupied; the desk zone is empty and not drawn
+    const zones = map.shadowRoot!.querySelectorAll("g.zone");
+    expect(zones).toHaveLength(1);
+    expect(zones[0].getAttribute("class")).toContain("selected");
+    expect(zones[0].getAttribute("class")).toContain("occupied");
+    expect(zones[0].textContent).toContain("Couch Zone");
+    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m, y 1.71 m");
 
     const imperial = [...root.querySelectorAll(".segmented button")].find((b) => b.textContent?.includes("Imperial"));
     (imperial as HTMLButtonElement).click();
@@ -116,18 +122,18 @@ describe("ld2450-zone-card", () => {
 
   it("uses the saved radar position and saves changes", async () => {
     const h = hass();
-    systemData = { mounts: { dev1: { upsideDown: true, rotation: 0, offset: { x: 0, y: 0 } } } };
+    systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 0, y: 0 } } } };
     const root = await renderCard({}, h);
     const map = root.querySelector("ld2450-zone-map") as unknown as {
       mount: unknown;
       updateComplete: Promise<unknown>;
     };
-    expect(map.mount).toEqual({ upsideDown: true, rotation: 0, offset: { x: 0, y: 0 } });
-    // Upside down keeps the radar's x
+    expect(map.mount).toEqual({ invertX: true, rotation: 0, offset: { x: 0, y: 0 } });
+    // Inverting mirrors the radar's x
     await map.updateComplete;
-    expect((map as unknown as HTMLElement).shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m");
+    expect((map as unknown as HTMLElement).shadowRoot!.querySelector(".readout")!.textContent).toContain("x 0.78 m");
 
-    const mount = { upsideDown: false, rotation: 45, offset: { x: 1000, y: 0 } };
+    const mount = { invertX: false, rotation: 45, offset: { x: 1000, y: 0 } };
     root.querySelector("ld2450-mount-editor")!.dispatchEvent(new CustomEvent("mount-changed", { detail: mount }));
     await (root.host as Ld2450ZoneCard).updateComplete;
     expect(map.mount).toEqual(mount);

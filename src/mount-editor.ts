@@ -5,6 +5,15 @@ import { type Units, fromInputValue, inputUnit, toInputValue } from "./units";
 const MAX_OFFSET = 50000;
 
 /** Controls for how the radar is mounted. Fires "mount-changed" with the new mount in the detail. */
+type Field = "rotation" | "x" | "y";
+
+/** Keep a rotation in (-180, 180]. */
+function normalizeRotation(value: number): number {
+  const rotation = ((Math.round(value) % 360) + 360) % 360;
+  return rotation > 180 ? rotation - 360 : rotation;
+}
+
+/** Controls for how the radar is mounted. Fires "mount-changed" with the new mount in the detail. */
 export class Ld2450MountEditor extends LitElement {
   static override properties = {
     mount: { attribute: false },
@@ -16,85 +25,84 @@ export class Ld2450MountEditor extends LitElement {
   units: Units = "metric";
   disabled = false;
 
+  // What the user is typing, so re-renders don't reformat a number while it's being edited
+  private _drafts: Partial<Record<Field, string>> = {};
+
   override render() {
     const unit = inputUnit(this.units);
     const step = this.units === "metric" ? 0.01 : 0.1;
     const maxOffset = toInputValue(MAX_OFFSET, this.units);
     return html`
-      <label class="check">
+      <label class="check" title="Mirror left and right, for example when the radar is mounted upside down">
         <input
           type="checkbox"
-          .checked=${this.mount.upsideDown}
+          .checked=${this.mount.invertX}
           ?disabled=${this.disabled}
-          @change=${(ev: Event) => this._change({ upsideDown: (ev.target as HTMLInputElement).checked })}
+          @change=${(ev: Event) => this._change({ invertX: (ev.target as HTMLInputElement).checked })}
         />
-        Upside down
+        Invert X <span class="hint">(mirror left and right)</span>
       </label>
       <div class="row">
-        <label title="Counter-clockwise, in degrees">
-          Rotation (° CCW)
-          <input
-            type="number"
-            min="-180"
-            max="180"
-            step="1"
-            .value=${String(this.mount.rotation)}
-            ?disabled=${this.disabled}
-            @change=${this._rotationChanged}
-          />
-        </label>
-        <label>
-          Radar X (${unit})
-          <input
-            type="number"
-            min=${-maxOffset}
-            max=${maxOffset}
-            step=${step}
-            .value=${String(toInputValue(this.mount.offset.x, this.units))}
-            ?disabled=${this.disabled}
-            @change=${(ev: Event) => this._offsetChanged(ev, "x")}
-          />
-        </label>
-        <label>
-          Radar Y (${unit})
-          <input
-            type="number"
-            min=${-maxOffset}
-            max=${maxOffset}
-            step=${step}
-            .value=${String(toInputValue(this.mount.offset.y, this.units))}
-            ?disabled=${this.disabled}
-            @change=${(ev: Event) => this._offsetChanged(ev, "y")}
-          />
-        </label>
+        ${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}
+        ${this._renderNumber("x", `Radar X (${unit})`, -maxOffset, maxOffset, step)}
+        ${this._renderNumber("y", `Radar Y (${unit})`, -maxOffset, maxOffset, step)}
       </div>
       ${this.disabled ? html`<p class="note">Only administrators can change the radar position.</p>` : nothing}
     `;
   }
 
-  private _rotationChanged(ev: Event): void {
-    const input = ev.target as HTMLInputElement;
-    const value = Number(input.value);
-    if (input.value === "" || !Number.isFinite(value)) {
-      input.value = String(this.mount.rotation);
-      return;
-    }
-    // Keep it in (-180, 180]
-    let rotation = ((Math.round(value) % 360) + 360) % 360;
-    if (rotation > 180) rotation -= 360;
-    input.value = String(rotation);
-    this._change({ rotation });
+  private _renderNumber(field: Field, label: string, min: number, max: number, step: number) {
+    return html`
+      <label>
+        ${label}
+        <input
+          type="number"
+          min=${min}
+          max=${max}
+          step=${step}
+          .value=${this._drafts[field] ?? this._format(field)}
+          ?disabled=${this.disabled}
+          @input=${(ev: Event) => this._input(field, ev.target as HTMLInputElement)}
+          @change=${(ev: Event) => this._commit(field, ev.target as HTMLInputElement)}
+        />
+      </label>
+    `;
   }
 
-  private _offsetChanged(ev: Event, axis: "x" | "y"): void {
-    const input = ev.target as HTMLInputElement;
-    const value = Number(input.value);
-    if (input.value === "" || !Number.isFinite(value)) {
-      input.value = String(toInputValue(this.mount.offset[axis], this.units));
-      return;
-    }
+  private _format(field: Field): string {
+    if (field === "rotation") return String(this.mount.rotation);
+    return String(toInputValue(this.mount.offset[field], this.units));
+  }
+
+  /** The mount change for a value typed in a field, or undefined if it isn't a number. */
+  private _parse(field: Field, text: string): Partial<Mount> | undefined {
+    const value = Number(text);
+    if (text.trim() === "" || !Number.isFinite(value)) return undefined;
+    if (field === "rotation") return { rotation: normalizeRotation(value) };
     const mm = Math.max(-MAX_OFFSET, Math.min(MAX_OFFSET, fromInputValue(value, this.units)));
-    this._change({ offset: { ...this.mount.offset, [axis]: mm } });
+    return { offset: { ...this.mount.offset, [field]: mm } };
+  }
+
+  /** Every keystroke, arrow and scroll: update the map right away. */
+  private _input(field: Field, input: HTMLInputElement): void {
+    const change = this._parse(field, input.value);
+    // Partial numbers such as "1." read as "" in number inputs; leave them alone until they're complete
+    if (change === undefined) return;
+    this._drafts = { ...this._drafts, [field]: input.value };
+    this._change(change);
+  }
+
+  /** Enter or leaving the field: show the value in use, normalized. */
+  private _commit(field: Field, input: HTMLInputElement): void {
+    const change = this._parse(field, input.value);
+    this._drafts = { ...this._drafts, [field]: undefined };
+    if (change === undefined) {
+      // Not a number: go back to the value in use. The render wouldn't, as its value hasn't changed
+      input.value = this._format(field);
+    } else {
+      this._change(change);
+    }
+    this.requestUpdate();
   }
 
   private _change(change: Partial<Mount>): void {
@@ -107,6 +115,8 @@ export class Ld2450MountEditor extends LitElement {
     .row {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
+      /* Labels may wrap on narrow screens; keep the inputs lined up */
+      align-items: end;
       gap: 12px;
       margin-top: 8px;
     }
@@ -119,9 +129,14 @@ export class Ld2450MountEditor extends LitElement {
     }
     label.check {
       flex-direction: row;
+      flex-wrap: wrap;
       align-items: center;
       font-size: 1em;
       color: var(--primary-text-color);
+    }
+    .hint {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
     }
     input[type="number"] {
       padding: 6px 8px;

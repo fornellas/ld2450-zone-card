@@ -25,7 +25,7 @@ describe("ld2450-mount-editor", () => {
     const { changes, inputs } = await editor();
     inputs[0].checked = true;
     inputs[0].dispatchEvent(new Event("change"));
-    expect(changes).toEqual([{ ...DEFAULT_MOUNT, upsideDown: true }]);
+    expect(changes).toEqual([{ ...DEFAULT_MOUNT, invertX: true }]);
   });
 
   it.each([
@@ -54,6 +54,28 @@ describe("ld2450-mount-editor", () => {
     const imperial = await editor("imperial");
     setValue(imperial.inputs[3], "10");
     expect(imperial.changes).toEqual([{ ...DEFAULT_MOUNT, offset: { x: 0, y: 3048 } }]);
+  });
+
+  it("updates while typing or scrolling, before the field loses focus", async () => {
+    const { el, changes, inputs } = await editor();
+    inputs[2].value = "1.50";
+    inputs[2].dispatchEvent(new Event("input"));
+    expect(changes).toEqual([{ ...DEFAULT_MOUNT, offset: { x: 1500, y: 0 } }]);
+    // The parent applies the change; what the user typed stays as typed
+    el.mount = changes[0];
+    await el.updateComplete;
+    expect(inputs[2].value).toBe("1.50");
+    // Leaving the field shows the value in use
+    inputs[2].dispatchEvent(new Event("change"));
+    await el.updateComplete;
+    expect(inputs[2].value).toBe("1.5");
+  });
+
+  it("waits for partial numbers to be complete", async () => {
+    const { changes, inputs } = await editor();
+    inputs[1].value = "";
+    inputs[1].dispatchEvent(new Event("input"));
+    expect(changes).toEqual([]);
   });
 
   it("disables inputs for non-admins", async () => {

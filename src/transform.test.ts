@@ -7,17 +7,17 @@ const close = (a: { x: number; y: number }, b: { x: number; y: number }) => {
 };
 
 describe("transform", () => {
-  it("mirrors x by default, since the radar's x grows towards its left", () => {
-    close(toRoom({ x: -782, y: 1713 }, DEFAULT_MOUNT), { x: 782, y: 1713 });
+  it("is the identity by default", () => {
+    close(toRoom({ x: -782, y: 1713 }, DEFAULT_MOUNT), { x: -782, y: 1713 });
   });
 
-  it("keeps x when upside down", () => {
-    close(toRoom({ x: 100, y: 200 }, { ...DEFAULT_MOUNT, upsideDown: true }), { x: 100, y: 200 });
+  it("mirrors x when inverted", () => {
+    close(toRoom({ x: 100, y: 200 }, { ...DEFAULT_MOUNT, invertX: true }), { x: -100, y: 200 });
   });
 
   it("rotates counter-clockwise", () => {
     close(toRoom({ x: 0, y: 1000 }, { ...DEFAULT_MOUNT, rotation: 90 }), { x: -1000, y: 0 });
-    close(toRoom({ x: -1000, y: 0 }, { ...DEFAULT_MOUNT, rotation: 90 }), { x: 0, y: 1000 });
+    close(toRoom({ x: 1000, y: 0 }, { ...DEFAULT_MOUNT, rotation: 90 }), { x: 0, y: 1000 });
   });
 
   it("offsets the radar position", () => {
@@ -26,9 +26,9 @@ describe("transform", () => {
 
   it.each<Mount>([
     DEFAULT_MOUNT,
-    { upsideDown: true, rotation: 0, offset: { x: 0, y: 0 } },
-    { upsideDown: false, rotation: 37, offset: { x: 1200, y: -450 } },
-    { upsideDown: true, rotation: -135, offset: { x: -3000, y: 2500 } },
+    { invertX: true, rotation: 0, offset: { x: 0, y: 0 } },
+    { invertX: false, rotation: 37, offset: { x: 1200, y: -450 } },
+    { invertX: true, rotation: -135, offset: { x: -3000, y: 2500 } },
   ])("round-trips with %o", (mount) => {
     for (const p of [
       { x: 0, y: 0 },

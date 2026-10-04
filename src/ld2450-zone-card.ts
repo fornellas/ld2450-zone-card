@@ -210,6 +210,12 @@ export class Ld2450ZoneCard extends LitElement {
         .mount=${mount}
         .units=${this._units}
         .targets=${readTargets(this.hass!, device.targets)}
+        .zones=${device.zones.map((z) => ({
+          name: z.name,
+          points: parsePolygon(this.hass!.states[z.polygon]?.state ?? "") ?? [],
+          selected: z.polygon === zone?.polygon,
+          occupied: z.presence !== undefined && this.hass!.states[z.presence]?.state === "on",
+        }))}
       ></ld2450-zone-map>
       <details>
         <summary>Entities</summary>
