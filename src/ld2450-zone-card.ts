@@ -4,10 +4,20 @@ import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-typ
 import { fetchEntityIdParts } from "./naming";
 import { parsePolygon } from "./polygon";
 import { readTargets } from "./targets";
-import { DEFAULT_MOUNT } from "./transform";
+import {
+  type SystemSettings,
+  deviceMount,
+  saveSystemSettings,
+  subscribeSystemSettings,
+  withDeviceMount,
+} from "./system-settings";
+import type { Mount } from "./transform";
 import { type Units, defaultUnits } from "./units";
 import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import "./mount-editor";
 import "./zone-map";
+
+const SAVE_DELAY_MS = 500;
 
 declare const __VERSION__: string;
 
@@ -38,6 +48,8 @@ export class Ld2450ZoneCard extends LitElement {
     _zoneId: { state: true },
     _entityIdParts: { state: true },
     _userSettings: { state: true },
+    _systemSettings: { state: true },
+    _saveError: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -46,6 +58,10 @@ export class Ld2450ZoneCard extends LitElement {
   private _zoneId?: string;
   private _entityIdParts?: EntityNameType[];
   private _userSettings?: UserSettings;
+  private _systemSettings?: SystemSettings;
+  private _unsubscribeSystem?: Promise<() => void>;
+  private _saveTimer?: ReturnType<typeof setTimeout>;
+  private _saveError?: string;
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -78,6 +94,41 @@ export class Ld2450ZoneCard extends LitElement {
       this._userSettings = {};
       fetchUserSettings(this.hass).then((settings) => (this._userSettings = { ...settings, ...this._userSettings }));
     }
+    if (this.hass !== undefined && this._unsubscribeSystem === undefined && this.isConnected) {
+      this._unsubscribeSystem = subscribeSystemSettings(this.hass, (settings) => {
+        // Don't let an echo of an older value undo a change that is still waiting to be saved
+        if (this._saveTimer === undefined) this._systemSettings = settings;
+      });
+      this._unsubscribeSystem.catch((err) => {
+        console.warn("ld2450-zone-card: could not read the radar positions", err);
+        this._systemSettings = {};
+      });
+    }
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    // Subscribes again in willUpdate after being moved around the dashboard
+    this.requestUpdate();
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._unsubscribeSystem?.then((unsubscribe) => unsubscribe()).catch(() => undefined);
+    this._unsubscribeSystem = undefined;
+  }
+
+  private _mountChanged(deviceId: string, mount: Mount): void {
+    this._systemSettings = withDeviceMount(this._systemSettings ?? {}, deviceId, mount);
+    this._saveError = undefined;
+    clearTimeout(this._saveTimer);
+    // Typing in a number field fires a change per step; save once it settles
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = undefined;
+      saveSystemSettings(this.hass!, this._systemSettings!).catch((err) => {
+        this._saveError = `Could not save the radar position: ${err?.message ?? err}`;
+      });
+    }, SAVE_DELAY_MS);
   }
 
   private get _units(): Units {
@@ -117,6 +168,7 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   private _renderDevice(devices: Ld2450Device[], device: Ld2450Device, zone: Zone | undefined) {
+    const mount = deviceMount(this._systemSettings, device.id);
     return html`
       <div class="selectors">
         <label>
@@ -144,8 +196,18 @@ export class Ld2450ZoneCard extends LitElement {
           )}
         </div>
       </div>
+      <details class="mount">
+        <summary>Radar position</summary>
+        <ld2450-mount-editor
+          .mount=${mount}
+          .units=${this._units}
+          ?disabled=${!this.hass!.user?.is_admin || this._systemSettings === undefined}
+          @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
+        ></ld2450-mount-editor>
+        ${this._saveError === undefined ? nothing : html`<p class="error">${this._saveError}</p>`}
+      </details>
       <ld2450-zone-map
-        .mount=${DEFAULT_MOUNT}
+        .mount=${mount}
         .units=${this._units}
         .targets=${readTargets(this.hass!, device.targets)}
       ></ld2450-zone-map>
@@ -247,6 +309,16 @@ export class Ld2450ZoneCard extends LitElement {
     }
     details {
       margin-top: 12px;
+    }
+    details.mount {
+      margin: 0 0 12px;
+    }
+    details.mount[open] summary {
+      margin-bottom: 12px;
+    }
+    .error {
+      margin: 8px 0 0;
+      color: var(--error-color);
     }
     summary {
       cursor: pointer;

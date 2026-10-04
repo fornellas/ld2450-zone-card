@@ -6,9 +6,11 @@ import type { Ld2450ZoneCard } from "./ld2450-zone-card";
 import { POLYGON_PATTERN } from "./polygon";
 
 let calls: { type: string; [key: string]: unknown }[] = [];
+let systemData: unknown = null;
 
 function hass(): HomeAssistant {
   calls = [];
+  systemData = null;
   const states: HomeAssistant["states"] = {};
   const entities: HomeAssistant["entities"] = {};
   const add = (entity_id: string, state: string, attributes: Record<string, unknown>) => {
@@ -36,6 +38,14 @@ function hass(): HomeAssistant {
     entities,
     devices: { dev1: { id: "dev1", name: "Office", name_by_user: null } },
     config: { unit_system: { length: "km" } },
+    user: { is_admin: true },
+    connection: {
+      subscribeMessage: <T>(callback: (event: T) => void, msg: { type: string; [key: string]: unknown }) => {
+        calls.push(msg);
+        callback({ value: systemData } as T);
+        return Promise.resolve(() => undefined);
+      },
+    },
     callWS: <T>(msg: { type: string; [key: string]: unknown }) => {
       calls.push(msg);
       if (msg.type === "config/entity_registry/settings/get") {
@@ -102,6 +112,36 @@ describe("ld2450-zone-card", () => {
       key: "ld2450_zone_card",
       value: { units: "imperial" },
     });
+  });
+
+  it("uses the saved radar position and saves changes", async () => {
+    const h = hass();
+    systemData = { mounts: { dev1: { upsideDown: true, rotation: 0, offset: { x: 0, y: 0 } } } };
+    const root = await renderCard({}, h);
+    const map = root.querySelector("ld2450-zone-map") as unknown as {
+      mount: unknown;
+      updateComplete: Promise<unknown>;
+    };
+    expect(map.mount).toEqual({ upsideDown: true, rotation: 0, offset: { x: 0, y: 0 } });
+    // Upside down keeps the radar's x
+    await map.updateComplete;
+    expect((map as unknown as HTMLElement).shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m");
+
+    const mount = { upsideDown: false, rotation: 45, offset: { x: 1000, y: 0 } };
+    root.querySelector("ld2450-mount-editor")!.dispatchEvent(new CustomEvent("mount-changed", { detail: mount }));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    expect(map.mount).toEqual(mount);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(calls).toContainEqual({
+      type: "frontend/set_system_data",
+      key: "ld2450_zone_card",
+      value: { mounts: { dev1: mount } },
+    });
+  });
+
+  it("does not let non-admins change the radar position", async () => {
+    const root = await renderCard({}, { ...hass(), user: { is_admin: false } });
+    expect((root.querySelector("ld2450-mount-editor") as unknown as { disabled: boolean }).disabled).toBe(true);
   });
 
   it("rejects invalid config", () => {

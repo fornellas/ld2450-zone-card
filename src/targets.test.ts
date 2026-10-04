@@ -13,6 +13,7 @@ function hass(states: Record<string, string>): HomeAssistant {
     entities: {},
     devices: {},
     config: { unit_system: { length: "km" } },
+    connection: { subscribeMessage: () => Promise.reject(new Error()) },
     callWS: () => Promise.reject(new Error()),
   };
 }

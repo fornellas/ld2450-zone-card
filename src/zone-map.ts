@@ -51,7 +51,8 @@ export class Ld2450ZoneMap extends LitElement {
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
     const bounds = FIRMWARE_BOUNDS.map((p) => toRoom(p, this.mount));
-    const content = extentOf([...area, ...bounds]);
+    // Keep the room origin in view, so the radar offset can be seen against the axes
+    const content = extentOf([...area, ...bounds, { x: 0, y: 0 }]);
     const size = Math.max(content.maxX - content.minX, content.maxY - content.minY);
     const font = size * 0.025;
     // Room for the axis labels on the left and bottom

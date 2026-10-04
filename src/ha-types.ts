@@ -35,6 +35,13 @@ export interface HomeAssistant {
   entities: Record<string, EntityRegistryDisplayEntry>;
   devices: Record<string, DeviceRegistryEntry>;
   config: { unit_system: { length: string } };
+  user?: { is_admin: boolean };
+  connection: {
+    subscribeMessage<T>(
+      callback: (event: T) => void,
+      msg: { type: string; [key: string]: unknown },
+    ): Promise<() => void>;
+  };
   callWS<T>(msg: { type: string; [key: string]: unknown }): Promise<T>;
   /** Name an entity from registry parts, like HA's own UI. HA 2026.4+. */
   formatEntityName?(stateObj: HassEntity, name: EntityNameItem[], options?: { separator?: string }): string;

@@ -32,3 +32,19 @@ export function formatLength(mm: number, units: Units): string {
 export function defaultUnits(lengthUnit: string | undefined): Units {
   return lengthUnit === "mi" ? "imperial" : "metric";
 }
+
+/** The unit of length inputs: metres or feet. */
+export function inputUnit(units: Units): string {
+  return units === "metric" ? "m" : "ft";
+}
+
+/** A length in mm as a value for an input in metres or feet. */
+export function toInputValue(mm: number, units: Units): number {
+  const value = units === "metric" ? mm / 1000 : mm / MM_PER_FOOT;
+  return Math.round(value * 100) / 100;
+}
+
+/** A value from an input in metres or feet, in whole mm. */
+export function fromInputValue(value: number, units: Units): number {
+  return Math.round(units === "metric" ? value * 1000 : value * MM_PER_FOOT);
+}
