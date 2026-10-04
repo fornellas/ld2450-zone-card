@@ -19,6 +19,18 @@ function hass(): HomeAssistant {
   add("text.couch", "0,0;1000,0;1000,600", { ...polygon, friendly_name: "Office Couch Zone" });
   add("text.desk", "", { ...polygon, friendly_name: "Office Desk Zone" });
   add("binary_sensor.couch", "on", { friendly_name: "Office Couch Occupied", device_class: "occupancy" });
+  add("sensor.t1_x", "-782", {
+    friendly_name: "Office Target 1 X",
+    unit_of_measurement: "mm",
+    device_class: "distance",
+    icon: "mdi:alpha-x-box-outline",
+  });
+  add("sensor.t1_y", "1713", {
+    friendly_name: "Office Target 1 Y",
+    unit_of_measurement: "mm",
+    device_class: "distance",
+    icon: "mdi:alpha-y-box-outline",
+  });
   return {
     states,
     entities,
@@ -77,6 +89,8 @@ describe("ld2450-zone-card", () => {
     await (map as unknown as { updateComplete: Promise<unknown> }).updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.area")).not.toBeNull();
     expect(map.shadowRoot!.textContent).toContain("2 m");
+    expect(map.shadowRoot!.querySelectorAll("g.target")).toHaveLength(1);
+    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m, y 1.71 m");
 
     const imperial = [...root.querySelectorAll(".segmented button")].find((b) => b.textContent?.includes("Imperial"));
     (imperial as HTMLButtonElement).click();

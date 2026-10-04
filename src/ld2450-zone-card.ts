@@ -3,6 +3,7 @@ import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from 
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
 import { parsePolygon } from "./polygon";
+import { readTargets } from "./targets";
 import { DEFAULT_MOUNT } from "./transform";
 import { type Units, defaultUnits } from "./units";
 import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
@@ -143,7 +144,11 @@ export class Ld2450ZoneCard extends LitElement {
           )}
         </div>
       </div>
-      <ld2450-zone-map .mount=${DEFAULT_MOUNT} .units=${this._units}></ld2450-zone-map>
+      <ld2450-zone-map
+        .mount=${DEFAULT_MOUNT}
+        .units=${this._units}
+        .targets=${readTargets(this.hass!, device.targets)}
+      ></ld2450-zone-map>
       <details>
         <summary>Entities</summary>
         ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}

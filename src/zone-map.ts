@@ -1,12 +1,14 @@
 import { LitElement, css, html, svg } from "lit";
 import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
 import type { Point } from "./polygon";
+import type { TargetPosition } from "./targets";
 import { DEFAULT_MOUNT, type Mount, toRoom } from "./transform";
-import { type Units, formatGridLabel, gridSpacing } from "./units";
+import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
 const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
 const HEADING_LENGTH = 700;
+const TARGET_RADIUS = 180;
 
 interface Extent {
   minX: number;
@@ -39,10 +41,12 @@ export class Ld2450ZoneMap extends LitElement {
   static override properties = {
     mount: { attribute: false },
     units: { attribute: false },
+    targets: { attribute: false },
   };
 
   mount: Mount = DEFAULT_MOUNT;
   units: Units = "metric";
+  targets: TargetPosition[] = [];
 
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
@@ -64,11 +68,24 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderGrid(view, font)}
         <polygon class="bounds" points=${pointsAttr(bounds)}></polygon>
         <polygon class="area" points=${pointsAttr(area)}></polygon>
-        ${this._renderRadar()}
+        ${this._renderRadar()} ${this._renderTargets(font)}
       </svg>
       <div class="legend">
         <span><i class="swatch area"></i>Tracking range (datasheet)</span>
         <span><i class="swatch bounds"></i>Zone point limits</span>
+        <span><i class="swatch target"></i>Targets</span>
+      </div>
+      <div class="readout">
+        ${
+          this.targets.length === 0
+            ? html`<span>No targets tracked</span>`
+            : this.targets.map((t) => {
+                const p = toRoom(t.point, this.mount);
+                return html`<span>
+                  <b>${t.label}</b> x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}
+                </span>`;
+              })
+        }
       </div>
     `;
   }
@@ -97,6 +114,21 @@ export class Ld2450ZoneMap extends LitElement {
           )}
       </g>
     `;
+  }
+
+  private _renderTargets(font: number) {
+    return this.targets.map((t) => {
+      const p = toRoom(t.point, this.mount);
+      return svg`
+        <g class="target">
+          <title>${t.name}: x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}</title>
+          <circle cx=${p.x} cy=${-p.y} r=${TARGET_RADIUS}></circle>
+          <text x=${p.x} y=${-p.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
+            ${t.label}
+          </text>
+        </g>
+      `;
+    });
   }
 
   private _renderRadar() {
@@ -164,6 +196,25 @@ export class Ld2450ZoneMap extends LitElement {
       stroke: var(--primary-text-color);
       stroke-width: 2;
     }
+    .target circle {
+      fill: var(--accent-color, #ff9800);
+      stroke: var(--card-background-color, #fff);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+    .target text {
+      fill: var(--text-accent-color, #fff);
+      font-weight: 700;
+    }
+    .readout {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      margin-top: 4px;
+      font-size: 0.85em;
+      font-variant-numeric: tabular-nums;
+      color: var(--secondary-text-color);
+    }
     .legend {
       display: flex;
       flex-wrap: wrap;
@@ -182,6 +233,11 @@ export class Ld2450ZoneMap extends LitElement {
     .swatch.area {
       background: color-mix(in srgb, var(--primary-color) 15%, transparent);
       border: 1.5px solid var(--primary-color);
+    }
+    .swatch.target {
+      width: 10px;
+      border-radius: 50%;
+      background: var(--accent-color, #ff9800);
     }
     .swatch.bounds {
       border: 1px dashed var(--secondary-text-color);
