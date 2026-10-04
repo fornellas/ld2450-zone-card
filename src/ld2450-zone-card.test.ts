@@ -150,6 +150,92 @@ describe("ld2450-zone-card", () => {
     expect((root.querySelector("ld2450-mount-editor") as unknown as { disabled: boolean }).disabled).toBe(true);
   });
 
+  describe("editing", () => {
+    async function edit() {
+      const root = await renderCard({}, hass());
+      const card = root.host as Ld2450ZoneCard;
+      const update = async () => {
+        await card.updateComplete;
+      };
+      const textarea = () => root.querySelector("textarea")!;
+      const deviceValue = () => root.querySelector(".device-value code")!.textContent;
+      const button = (label: string) =>
+        [...root.querySelectorAll(".edit-toolbar button")].find((b) =>
+          b.textContent!.includes(label),
+        ) as HTMLButtonElement;
+      const type = async (value: string) => {
+        textarea().value = value;
+        textarea().dispatchEvent(new Event("input"));
+        await update();
+      };
+      return { root, update, textarea, deviceValue, button, type };
+    }
+
+    it("starts from the device's polygon", async () => {
+      const { textarea, deviceValue, root, button } = await edit();
+      expect(textarea().value).toBe("0,0;1000,0;1000,600");
+      expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+      expect(root.querySelector(".dirty")).toBeNull();
+      expect(button("Revert").disabled).toBe(true);
+    });
+
+    it("edits the polygon from the text", async () => {
+      const { type, deviceValue, root, button } = await edit();
+      await type("0,0;2000,0;2000,600;0,600");
+      expect(deviceValue()).toBe("0,0;2000,0;2000,600;0,600");
+      expect(root.querySelector(".dirty")).not.toBeNull();
+      expect(root.querySelector(".status")!.textContent).toContain("4 / 23 points");
+      expect(button("Revert").disabled).toBe(false);
+    });
+
+    it("explains text it can't read and keeps the last polygon", async () => {
+      const { type, deviceValue, root, textarea } = await edit();
+      await type("0,0;2000,0;2000");
+      expect(textarea().value).toBe("0,0;2000,0;2000");
+      expect(root.querySelector(".errors")!.textContent).toContain("Point 3");
+      expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+    });
+
+    it("flags points outside the limits", async () => {
+      const { type, root } = await edit();
+      await type("0,0;6000,0;0,600");
+      expect(root.querySelector(".errors")!.textContent).toContain("Point 2 is outside");
+    });
+
+    it("clears and reverts", async () => {
+      const { button, update, deviceValue, textarea } = await edit();
+      button("Clear").click();
+      await update();
+      expect(deviceValue()).toBe("(empty: zone disabled)");
+      expect(textarea().value).toBe("");
+      button("Revert").click();
+      await update();
+      expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+    });
+
+    it("applies edits from the map", async () => {
+      const { root, update, deviceValue } = await edit();
+      const draft = [
+        { x: 0, y: 0 },
+        { x: 500.4, y: 0 },
+        { x: 500, y: 500 },
+      ];
+      root.querySelector("ld2450-zone-map")!.dispatchEvent(new CustomEvent("draft-changed", { detail: draft }));
+      await update();
+      expect(deviceValue()).toBe("0,0;500,0;500,500");
+    });
+
+    it("shows room coordinates and writes radar coordinates", async () => {
+      systemData = null;
+      const h = hass();
+      systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
+      const root = await renderCard({}, h);
+      // Radar (1000,0) -> inverted (-1000,0) -> offset (0,0)
+      expect(root.querySelector("textarea")!.value).toBe("1000,0;0,0;0,600");
+      expect(root.querySelector(".device-value code")!.textContent).toBe("0,0;1000,0;1000,600");
+    });
+  });
+
   it("rejects invalid config", () => {
     const card = document.createElement("ld2450-zone-card") as Ld2450ZoneCard;
     const config = { type: "custom:ld2450-zone-card", targets: [{ x: "sensor.x" }] };

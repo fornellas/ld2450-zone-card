@@ -1,6 +1,7 @@
-import { LitElement, css, html, svg } from "lit";
+import { LitElement, css, html, nothing, svg } from "lit";
 import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
-import type { Point } from "./polygon";
+import { distance, insertionIndex, snap } from "./geometry";
+import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
 
 /** A polygon zone to draw, in radar coordinates. */
@@ -11,13 +12,15 @@ export interface MapZone {
   /** Whether its presence sensor is on. */
   occupied: boolean;
 }
-import { DEFAULT_MOUNT, type Mount, toRoom } from "./transform";
+import { DEFAULT_MOUNT, type Mount, toRadar, toRoom } from "./transform";
 import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
 const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
 const HEADING_LENGTH = 700;
 const TARGET_RADIUS = 180;
+// Pointer movement, in screen pixels, before pressing a point becomes dragging it
+const DRAG_THRESHOLD_PX = 4;
 
 interface Extent {
   minX: number;
@@ -45,19 +48,44 @@ function steps(min: number, max: number, step: number): number[] {
   return values;
 }
 
-/** Top-down map of the room in room coordinates (mm), with the radar and where it can see. */
+/**
+ * Top-down map of the room in room coordinates (mm), with the radar and where it can see.
+ *
+ * When editable, the selected zone is drawn from `draft` with handles to edit it. Edits fire "draft-changed" with the
+ * new points in radar coordinates, and "vertex-selected" with the index of the selected point (or undefined).
+ */
 export class Ld2450ZoneMap extends LitElement {
   static override properties = {
     mount: { attribute: false },
     units: { attribute: false },
     targets: { attribute: false },
     zones: { attribute: false },
+    editable: { type: Boolean },
+    draft: { attribute: false },
+    deviceOutline: { attribute: false },
+    outside: { attribute: false },
+    selectedVertex: { attribute: false },
+    snapStep: { attribute: false },
   };
 
   mount: Mount = DEFAULT_MOUNT;
   units: Units = "metric";
   targets: TargetPosition[] = [];
   zones: MapZone[] = [];
+  editable = false;
+  /** The selected zone's points being edited, in radar coordinates. */
+  draft: Point[] = [];
+  /** The selected zone's polygon on the device, drawn when the draft differs from it. */
+  deviceOutline?: Point[];
+  /** Indexes of draft points outside the limits. */
+  outside: number[] = [];
+  selectedVertex?: number;
+  /** Snap edited points to multiples of this, in room mm. 0 doesn't snap. */
+  snapStep = 0;
+
+  /** Size of a point handle, in room mm. */
+  private _handle = 100;
+  private _drag?: { index: number; startX: number; startY: number; moved: boolean };
 
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
@@ -66,6 +94,7 @@ export class Ld2450ZoneMap extends LitElement {
     const content = extentOf([...area, ...bounds, { x: 0, y: 0 }]);
     const size = Math.max(content.maxX - content.minX, content.maxY - content.minY);
     const font = size * 0.025;
+    this._handle = size * 0.018;
     // Room for the axis labels on the left and bottom
     const view: Extent = {
       minX: content.minX - font * 4,
@@ -76,20 +105,31 @@ export class Ld2450ZoneMap extends LitElement {
     const viewBox = `${view.minX} ${-view.maxY} ${view.maxX - view.minX} ${view.maxY - view.minY}`;
 
     return html`
-      <svg viewBox=${viewBox} role="img" aria-label="Radar map" style="--font: ${font}px">
+      <svg
+        viewBox=${viewBox}
+        role="img"
+        aria-label="Radar map"
+        style="--font: ${font}px"
+        class=${this.editable ? "editable" : ""}
+        tabindex=${this.editable ? "0" : "-1"}
+        @click=${this._backgroundClick}
+        @keydown=${this._keydown}
+      >
         ${this._renderGrid(view, font)}
         <polygon class="bounds" points=${pointsAttr(bounds)}></polygon>
         <polygon class="area" points=${pointsAttr(area)}></polygon>
         ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTargets(font)}
+        ${this.editable ? this._renderEditor(font) : nothing}
       </svg>
       <div class="legend">
         <span><i class="swatch area"></i>Tracking range</span>
         <span><i class="swatch bounds"></i>Zone point limits</span>
-        <span><i class="swatch zone"></i>Zones</span>
+        <span><i class="swatch zone"></i>Selected zone</span>
         <span><i class="swatch occupied"></i>Occupied</span>
         <span><i class="swatch target"></i>Targets</span>
       </div>
       <div class="readout">
+        ${this._renderSelectedVertex()}
         ${
           this.targets.length === 0
             ? html`<span>No targets tracked</span>`
@@ -146,27 +186,168 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _renderZones(font: number) {
-    // The selected zone goes last, so it's drawn on top
+    // The selected zone goes last, so it's drawn on top. While editing, the editor draws it.
     const zones = [...this.zones]
+      .filter((z) => !(this.editable && z.selected))
       .filter((z) => z.points.length > 0)
       .sort((a, b) => Number(a.selected) - Number(b.selected));
     return zones.map((zone) => {
       const points = zone.points.map((p) => toRoom(p, this.mount));
-      const center = {
-        x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
-        y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
-      };
       const classes = ["zone", zone.selected ? "selected" : "", zone.occupied ? "occupied" : ""].join(" ");
       return svg`
         <g class=${classes}>
           <title>${zone.name}${zone.occupied ? " (occupied)" : ""}</title>
           <polygon points=${pointsAttr(points)}></polygon>
-          <text x=${center.x} y=${-center.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
-            ${zone.name}
-          </text>
+          ${this._renderZoneName(zone.name, points, font)}
         </g>
       `;
     });
+  }
+
+  private _renderZoneName(name: string, points: Point[], font: number) {
+    const center = {
+      x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+      y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+    };
+    return svg`
+      <text class="name" x=${center.x} y=${-center.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
+        ${name}
+      </text>
+    `;
+  }
+
+  private _renderEditor(font: number) {
+    const points = this.draft.map((p) => toRoom(p, this.mount));
+    const selected = this.zones.find((z) => z.selected);
+    const classes = ["zone", "selected", "editing", selected?.occupied ? "occupied" : ""].join(" ");
+    const outline = this.deviceOutline?.map((p) => toRoom(p, this.mount));
+    return svg`
+      ${outline !== undefined && outline.length > 0 ? svg`<polygon class="device-outline" points=${pointsAttr(outline)}></polygon>` : nothing}
+      <g class=${classes}>
+        ${
+          points.length >= 3
+            ? svg`<polygon points=${pointsAttr(points)}></polygon>`
+            : svg`<polyline points=${pointsAttr(points)}></polyline>`
+        }
+        ${points.length >= 3 && selected !== undefined ? this._renderZoneName(selected.name, points, font) : nothing}
+      </g>
+      ${points.map((p, i) => {
+        const vertexClasses = [
+          "vertex",
+          i === this.selectedVertex ? "selected" : "",
+          this.outside.includes(i) ? "outside" : "",
+        ].join(" ");
+        return svg`
+          <g
+            class=${vertexClasses}
+            @pointerdown=${(ev: PointerEvent) => this._vertexDown(ev, i)}
+            @pointermove=${(ev: PointerEvent) => this._vertexMove(ev)}
+            @pointerup=${(ev: PointerEvent) => this._vertexUp(ev)}
+            @pointercancel=${(ev: PointerEvent) => this._vertexUp(ev)}
+            @click=${(ev: Event) => ev.stopPropagation()}
+            @dblclick=${(ev: Event) => this._deleteVertex(ev, i)}
+          >
+            <circle class="hit" cx=${p.x} cy=${-p.y} r=${this._handle}></circle>
+            <circle class="dot" cx=${p.x} cy=${-p.y} r=${this._handle * 0.5}></circle>
+            <text x=${p.x + this._handle * 0.8} y=${-p.y - this._handle * 0.8} style="font-size: ${font * 0.8}px">${i + 1}</text>
+          </g>
+        `;
+      })}
+    `;
+  }
+
+  private _renderSelectedVertex() {
+    if (!this.editable || this.selectedVertex === undefined) return nothing;
+    const point = this.draft[this.selectedVertex];
+    if (point === undefined) return nothing;
+    const p = toRoom(point, this.mount);
+    return html`<span>
+      <b>Point ${this.selectedVertex + 1}</b> x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}
+    </span>`;
+  }
+
+  /** Where a pointer is, in room coordinates. */
+  private _roomPoint(ev: MouseEvent): Point | undefined {
+    const svgEl = this.renderRoot.querySelector("svg");
+    const ctm = svgEl?.getScreenCTM();
+    if (!ctm) return undefined;
+    const p = new DOMPoint(ev.clientX, ev.clientY).matrixTransform(ctm.inverse());
+    return { x: p.x, y: -p.y };
+  }
+
+  /** A point from the user, snapped in room coordinates, as radar coordinates. */
+  private _toDraftPoint(room: Point): Point {
+    return toRadar(snap(room, this.snapStep), this.mount);
+  }
+
+  private _emit<T>(name: string, detail: T): void {
+    this.dispatchEvent(new CustomEvent<T>(name, { detail, bubbles: true, composed: true }));
+  }
+
+  private _backgroundClick(ev: MouseEvent): void {
+    if (!this.editable || this.draft.length >= POLYGON_MAX_POINTS) return;
+    const room = this._roomPoint(ev);
+    if (room === undefined) return;
+    const roomPoints = this.draft.map((p) => toRoom(p, this.mount));
+    const index = insertionIndex(roomPoints, room, this._handle);
+    const draft = [...this.draft];
+    draft.splice(index, 0, this._toDraftPoint(room));
+    this._emit("draft-changed", draft);
+    this._emit("vertex-selected", index);
+  }
+
+  private _vertexDown(ev: PointerEvent, index: number): void {
+    ev.stopPropagation();
+    try {
+      // Keep receiving moves when the pointer leaves the small handle
+      (ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+    } catch {
+      // Synthetic events have no active pointer to capture
+    }
+    this._drag = { index, startX: ev.clientX, startY: ev.clientY, moved: false };
+    this._emit("vertex-selected", index);
+  }
+
+  private _vertexMove(ev: PointerEvent): void {
+    const drag = this._drag;
+    if (drag === undefined) return;
+    if (
+      !drag.moved &&
+      distance({ x: ev.clientX, y: ev.clientY }, { x: drag.startX, y: drag.startY }) < DRAG_THRESHOLD_PX
+    ) {
+      return;
+    }
+    drag.moved = true;
+    const room = this._roomPoint(ev);
+    if (room === undefined) return;
+    const draft = [...this.draft];
+    draft[drag.index] = this._toDraftPoint(room);
+    this._emit("draft-changed", draft);
+  }
+
+  private _vertexUp(ev: PointerEvent): void {
+    const target = ev.currentTarget as Element;
+    if (target.hasPointerCapture?.(ev.pointerId)) target.releasePointerCapture(ev.pointerId);
+    this._drag = undefined;
+  }
+
+  private _deleteVertex(ev: Event | undefined, index: number): void {
+    ev?.stopPropagation();
+    this._emit(
+      "draft-changed",
+      this.draft.filter((_, i) => i !== index),
+    );
+    this._emit("vertex-selected", undefined);
+  }
+
+  private _keydown(ev: KeyboardEvent): void {
+    if (!this.editable) return;
+    if ((ev.key === "Delete" || ev.key === "Backspace") && this.selectedVertex !== undefined) {
+      ev.preventDefault();
+      this._deleteVertex(undefined, this.selectedVertex);
+    } else if (ev.key === "Escape") {
+      this._emit("vertex-selected", undefined);
+    }
   }
 
   private _renderRadar() {
@@ -217,8 +398,9 @@ export class Ld2450ZoneMap extends LitElement {
     }
     .area {
       fill: var(--primary-color);
-      fill-opacity: 0.15;
+      fill-opacity: 0.07;
       stroke: var(--primary-color);
+      stroke-opacity: 0.45;
       stroke-width: 1.5;
     }
     .bounds {
@@ -242,22 +424,65 @@ export class Ld2450ZoneMap extends LitElement {
       stroke-dasharray: 6 4;
     }
     .zone text {
+      pointer-events: none;
       fill: var(--secondary-text-color);
     }
     .zone.occupied polygon {
-      fill: var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800));
-      fill-opacity: 0.3;
+      fill: var(--yellow-color, #ffeb3b);
+      fill-opacity: 0.45;
     }
-    .zone.selected polygon {
-      fill: var(--primary-color);
-      fill-opacity: 0.25;
-      stroke: var(--primary-color);
+    .zone.selected polygon,
+    .zone.selected polyline {
+      fill: var(--green-color, #4caf50);
+      fill-opacity: 0.2;
+      stroke: var(--green-color, #4caf50);
       stroke-width: 2.5;
       stroke-dasharray: none;
     }
+    .zone.selected polyline {
+      fill: none;
+    }
     .zone.selected.occupied polygon {
-      fill: var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800));
-      fill-opacity: 0.4;
+      fill: var(--yellow-color, #ffeb3b);
+      fill-opacity: 0.5;
+    }
+    .device-outline {
+      fill: none;
+      stroke: var(--green-color, #4caf50);
+      stroke-width: 1.5;
+      stroke-dasharray: 2 4;
+    }
+    svg.editable {
+      cursor: crosshair;
+    }
+    svg:focus {
+      outline: none;
+    }
+    .vertex {
+      cursor: move;
+      touch-action: none;
+    }
+    .vertex .hit {
+      fill: transparent;
+    }
+    .vertex .dot {
+      fill: var(--card-background-color, #fff);
+      stroke: var(--green-color, #4caf50);
+      stroke-width: 2;
+      vector-effect: non-scaling-stroke;
+    }
+    .vertex.selected .dot {
+      fill: var(--green-color, #4caf50);
+    }
+    .vertex.outside .dot {
+      stroke: var(--error-color, #db4437);
+    }
+    .vertex.outside.selected .dot {
+      fill: var(--error-color, #db4437);
+    }
+    .vertex text {
+      fill: var(--primary-text-color);
+      pointer-events: none;
     }
     .zone.selected text {
       fill: var(--primary-text-color);
@@ -298,8 +523,8 @@ export class Ld2450ZoneMap extends LitElement {
       vertical-align: middle;
     }
     .swatch.area {
-      background: color-mix(in srgb, var(--primary-color) 15%, transparent);
-      border: 1.5px solid var(--primary-color);
+      background: color-mix(in srgb, var(--primary-color) 7%, transparent);
+      border: 1.5px solid color-mix(in srgb, var(--primary-color) 45%, transparent);
     }
     .swatch.target {
       width: 10px;
@@ -307,15 +532,11 @@ export class Ld2450ZoneMap extends LitElement {
       background: var(--accent-color, #ff9800);
     }
     .swatch.zone {
-      background: color-mix(in srgb, var(--primary-color) 25%, transparent);
-      border: 2px solid var(--primary-color);
+      background: color-mix(in srgb, var(--green-color, #4caf50) 20%, transparent);
+      border: 2px solid var(--green-color, #4caf50);
     }
     .swatch.occupied {
-      background: color-mix(
-        in srgb,
-        var(--state-binary_sensor-occupancy-on-color, var(--state-active-color, #ff9800)) 40%,
-        transparent
-      );
+      background: color-mix(in srgb, var(--yellow-color, #ffeb3b) 45%, transparent);
       border: 1px solid var(--secondary-text-color);
     }
     .swatch.bounds {

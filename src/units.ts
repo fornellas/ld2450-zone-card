@@ -48,3 +48,8 @@ export function toInputValue(mm: number, units: Units): number {
 export function fromInputValue(value: number, units: Units): number {
   return Math.round(units === "metric" ? value * 1000 : value * MM_PER_FOOT);
 }
+
+/** Step to snap edited points to, in mm: 10 cm or 6 inches. */
+export function snapStep(units: Units): number {
+  return units === "metric" ? 100 : MM_PER_FOOT / 2;
+}

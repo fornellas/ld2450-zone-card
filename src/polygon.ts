@@ -63,3 +63,39 @@ export function parsePolygon(state: string): Point[] | undefined {
   }
   return points;
 }
+
+/** The canonical text the device stores and publishes: whole mm, no spaces. */
+export function formatPolygon(points: Point[]): string {
+  return points.map((p) => `${Math.round(p.x) + 0},${Math.round(p.y) + 0}`).join(";");
+}
+
+export interface PolygonCheck {
+  /** Why the device would reject the polygon; empty if it would accept it. */
+  errors: string[];
+  /** Indexes of points outside the coordinates the device accepts. */
+  outside: number[];
+}
+
+/** Check a polygon in radar coordinates against what the firmware accepts. An empty polygon disables the zone. */
+export function checkPolygon(points: Point[]): PolygonCheck {
+  const errors: string[] = [];
+  if (points.length > 0 && points.length < POLYGON_MIN_POINTS) {
+    errors.push(`A zone needs at least ${POLYGON_MIN_POINTS} points.`);
+  }
+  if (points.length > POLYGON_MAX_POINTS) {
+    errors.push(`A zone can have at most ${POLYGON_MAX_POINTS} points.`);
+  }
+  const outside: number[] = [];
+  points.forEach((p, i) => {
+    const x = Math.round(p.x);
+    const y = Math.round(p.y);
+    if (x < POLYGON_MIN_X || x > POLYGON_MAX_X || y < POLYGON_MIN_Y || y > POLYGON_MAX_Y) outside.push(i);
+  });
+  if (outside.length > 0) {
+    const which = outside.map((i) => i + 1).join(", ");
+    errors.push(
+      `Point${outside.length > 1 ? "s" : ""} ${which} ${outside.length > 1 ? "are" : "is"} outside the zone point limits.`,
+    );
+  }
+  return { errors, outside };
+}

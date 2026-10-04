@@ -2,7 +2,8 @@ import { LitElement, css, html, nothing } from "lit";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
-import { parsePolygon } from "./polygon";
+import { POLYGON_MAX_POINTS, type Point, checkPolygon, formatPolygon, parsePolygon } from "./polygon";
+import { formatRoomText, parseRoomText, textUnit } from "./polygon-text";
 import { readTargets } from "./targets";
 import {
   type SystemSettings,
@@ -11,8 +12,8 @@ import {
   subscribeSystemSettings,
   withDeviceMount,
 } from "./system-settings";
-import type { Mount } from "./transform";
-import { type Units, defaultUnits } from "./units";
+import { type Mount, toRadar, toRoom } from "./transform";
+import { type Units, defaultUnits, snapStep } from "./units";
 import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
@@ -50,6 +51,9 @@ export class Ld2450ZoneCard extends LitElement {
     _userSettings: { state: true },
     _systemSettings: { state: true },
     _saveError: { state: true },
+    _drafts: { state: true },
+    _selectedVertex: { state: true },
+    _text: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -62,6 +66,11 @@ export class Ld2450ZoneCard extends LitElement {
   private _unsubscribeSystem?: Promise<() => void>;
   private _saveTimer?: ReturnType<typeof setTimeout>;
   private _saveError?: string;
+  /** Edited polygons not yet written to the device, in radar coordinates, by zone entity. */
+  private _drafts: Record<string, Point[]> = {};
+  private _selectedVertex?: number;
+  /** The polygon text while the user is typing it, with why it can't be read, if so. */
+  private _text?: { value: string; error?: string };
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -169,6 +178,7 @@ export class Ld2450ZoneCard extends LitElement {
 
   private _renderDevice(devices: Ld2450Device[], device: Ld2450Device, zone: Zone | undefined) {
     const mount = deviceMount(this._systemSettings, device.id);
+    const editing = zone === undefined ? undefined : this._editing(zone);
     return html`
       <div class="selectors">
         <label>
@@ -216,7 +226,16 @@ export class Ld2450ZoneCard extends LitElement {
           selected: z.polygon === zone?.polygon,
           occupied: z.presence !== undefined && this.hass!.states[z.presence]?.state === "on",
         }))}
+        ?editable=${zone !== undefined}
+        .draft=${editing?.points ?? []}
+        .deviceOutline=${editing?.dirty ? editing.devicePoints : undefined}
+        .outside=${editing?.check.outside ?? []}
+        .selectedVertex=${this._selectedVertex}
+        .snapStep=${this._snap ? snapStep(this._units) : 0}
+        @draft-changed=${(ev: CustomEvent<Point[]>) => zone && this._setDraft(zone, ev.detail)}
+        @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
       ></ld2450-zone-map>
+      ${zone === undefined || editing === undefined ? nothing : this._renderEditor(zone, mount, editing)}
       <details>
         <summary>Entities</summary>
         ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}
@@ -229,6 +248,137 @@ export class Ld2450ZoneCard extends LitElement {
             </ul>`
       }
     `;
+  }
+
+  /** The selected zone's polygon being edited: the draft, or what the device has. */
+  private _editing(zone: Zone) {
+    const deviceState = this.hass!.states[zone.polygon]?.state ?? "unavailable";
+    const devicePoints = parsePolygon(deviceState);
+    const draft = this._drafts[zone.polygon];
+    const points = draft ?? devicePoints ?? [];
+    return {
+      points,
+      devicePoints,
+      deviceState,
+      dirty: draft !== undefined && formatPolygon(draft) !== deviceState,
+      check: checkPolygon(points),
+    };
+  }
+
+  private _renderEditor(zone: Zone, mount: Mount, editing: ReturnType<Ld2450ZoneCard["_editing"]>) {
+    const { points, check } = editing;
+    const text =
+      this._text?.value ??
+      formatRoomText(
+        points.map((p) => toRoom(p, mount)),
+        this._units,
+      );
+    const deviceValue = formatPolygon(points);
+    const full = points.length >= POLYGON_MAX_POINTS;
+    return html`
+      <div class="editor">
+        <p class="help">
+          ${
+            full
+              ? html`This zone has the most points it can have (${POLYGON_MAX_POINTS}).`
+              : html`Click the map to add a point, or click an edge to add one there.`
+          }
+          Drag a point to move it; double-click it, or select it and press Delete, to remove it.
+        </p>
+        <div class="edit-toolbar">
+          <label class="check">
+            <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
+            Snap to grid
+          </label>
+          <span class="spacer"></span>
+          <button
+            ?disabled=${this._selectedVertex === undefined || this._selectedVertex >= points.length}
+            @click=${() => this._deletePoint(zone, points)}
+          >
+            Delete point
+          </button>
+          <button ?disabled=${points.length === 0} @click=${() => this._setDraft(zone, [])}>Clear</button>
+          <button ?disabled=${!editing.dirty} @click=${() => this._revert(zone)}>Revert</button>
+        </div>
+        <label class="points">
+          Points (x,y in ${textUnit(this._units)}, room coordinates)
+          <textarea
+            rows="3"
+            spellcheck="false"
+            .value=${text}
+            @input=${(ev: Event) => this._textInput(zone, mount, (ev.target as HTMLTextAreaElement).value)}
+            @change=${this._textChange}
+          ></textarea>
+        </label>
+        <div class="device-value">
+          <span>To write to the device (radar mm):</span>
+          <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
+        </div>
+        <div class="status">
+          <span>${points.length} / ${POLYGON_MAX_POINTS} points</span>
+          ${editing.dirty ? html`<span class="dirty">Unsaved changes</span>` : nothing}
+        </div>
+        ${
+          this._text?.error === undefined && check.errors.length === 0
+            ? nothing
+            : html`<ul class="errors">
+                ${this._text?.error === undefined ? nothing : html`<li>${this._text.error}</li>`}
+                ${check.errors.map((e) => html`<li>${e}</li>`)}
+              </ul>`
+        }
+      </div>
+    `;
+  }
+
+  private _setDraft(zone: Zone, points: Point[]): void {
+    this._drafts = { ...this._drafts, [zone.polygon]: points };
+    this._text = undefined;
+    if (this._selectedVertex !== undefined && this._selectedVertex >= points.length) this._selectedVertex = undefined;
+  }
+
+  private _deletePoint(zone: Zone, points: Point[]): void {
+    const index = this._selectedVertex;
+    if (index === undefined) return;
+    this._setDraft(
+      zone,
+      points.filter((_, i) => i !== index),
+    );
+    this._selectedVertex = undefined;
+  }
+
+  private _revert(zone: Zone): void {
+    const { [zone.polygon]: _, ...rest } = this._drafts;
+    this._drafts = rest;
+    this._text = undefined;
+    this._selectedVertex = undefined;
+  }
+
+  private _textInput(zone: Zone, mount: Mount, value: string): void {
+    const parsed = parseRoomText(value, this._units);
+    if (typeof parsed === "string") {
+      // Keep what was typed, and the last polygon that could be read
+      this._text = { value, error: parsed };
+      return;
+    }
+    this._drafts = { ...this._drafts, [zone.polygon]: parsed.map((p) => toRadar(p, mount)) };
+    this._text = { value };
+    this._selectedVertex = undefined;
+  }
+
+  /** Leaving the text: show the polygon in use, unless the text can't be read and still needs fixing. */
+  private _textChange(): void {
+    if (this._text?.error === undefined) this._text = undefined;
+  }
+
+  private get _snap(): boolean {
+    return this._userSettings?.snap ?? true;
+  }
+
+  private _snapChanged(ev: Event): void {
+    this._userSettings = { ...this._userSettings, snap: (ev.target as HTMLInputElement).checked };
+    saveUserSettings(this.hass!, this._userSettings).catch((err) =>
+      console.warn("ld2450-zone-card: could not save user settings", err),
+    );
   }
 
   private _renderZone(zone: Zone) {
@@ -279,10 +429,14 @@ export class Ld2450ZoneCard extends LitElement {
   private _deviceChanged(ev: Event): void {
     this._deviceId = (ev.target as HTMLSelectElement).value;
     this._zoneId = undefined;
+    this._selectedVertex = undefined;
+    this._text = undefined;
   }
 
   private _zoneChanged(ev: Event): void {
     this._zoneId = (ev.target as HTMLSelectElement).value;
+    this._selectedVertex = undefined;
+    this._text = undefined;
   }
 
   static override styles = css`
@@ -367,6 +521,86 @@ export class Ld2450ZoneCard extends LitElement {
     }
     .empty {
       color: var(--secondary-text-color);
+    }
+    .editor {
+      margin-top: 12px;
+    }
+    .help {
+      margin: 0 0 8px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .edit-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .spacer {
+      flex: 1;
+    }
+    .edit-toolbar button {
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 0.9em;
+      color: var(--primary-color);
+      background: none;
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .edit-toolbar button:disabled {
+      color: var(--disabled-text-color, #bdbdbd);
+      cursor: default;
+    }
+    label.check {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      flex: 0 0 auto;
+      font-size: 1em;
+      color: var(--primary-text-color);
+    }
+    label.points {
+      margin-top: 12px;
+    }
+    textarea {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 8px;
+      font-family: var(--code-font-family, monospace);
+      font-size: 0.95em;
+      color: var(--primary-text-color);
+      background: var(--card-background-color);
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      resize: vertical;
+    }
+    .device-value {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      margin-top: 8px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .device-value code {
+      overflow-wrap: anywhere;
+    }
+    .status {
+      display: flex;
+      gap: 16px;
+      margin-top: 4px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+    }
+    .dirty {
+      color: var(--warning-color);
+    }
+    .errors {
+      margin: 8px 0 0;
+      padding-left: 20px;
+      color: var(--error-color);
     }
     .warnings {
       margin: 16px 0 0;

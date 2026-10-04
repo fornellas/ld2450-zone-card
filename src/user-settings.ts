@@ -7,6 +7,8 @@ const KEY = "ld2450_zone_card";
 
 export interface UserSettings {
   units?: Units;
+  /** Snap edited points to the grid. */
+  snap?: boolean;
 }
 
 export async function fetchUserSettings(hass: HomeAssistant): Promise<UserSettings> {
