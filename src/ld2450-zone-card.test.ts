@@ -90,7 +90,7 @@ describe("ld2450-zone-card", () => {
     expect(map.shadowRoot!.querySelector("polygon.area")).not.toBeNull();
     expect(map.shadowRoot!.textContent).toContain("2 m");
     expect(map.shadowRoot!.querySelectorAll("g.target")).toHaveLength(1);
-    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m, y 1.71 m");
+    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x 0.78 m, y 1.71 m");
 
     const imperial = [...root.querySelectorAll(".segmented button")].find((b) => b.textContent?.includes("Imperial"));
     (imperial as HTMLButtonElement).click();

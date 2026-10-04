@@ -71,7 +71,7 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderRadar()} ${this._renderTargets(font)}
       </svg>
       <div class="legend">
-        <span><i class="swatch area"></i>Tracking range (datasheet)</span>
+        <span><i class="swatch area"></i>Tracking range</span>
         <span><i class="swatch bounds"></i>Zone point limits</span>
         <span><i class="swatch target"></i>Targets</span>
       </div>

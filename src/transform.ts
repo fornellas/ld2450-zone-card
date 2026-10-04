@@ -1,10 +1,13 @@
 // Radar coordinates (what the device stores) <-> room coordinates (what the user sees).
+//
+// Room coordinates are seen from above, with +y ahead and +x to the right. The radar's own x grows towards its left
+// (seen from behind it), so the radar x is mirrored, unless the radar is mounted upside down.
 
 import type { Point } from "./polygon";
 
 /** How the radar is mounted in the room. */
 export interface Mount {
-  /** Mounted upside down, which mirrors the radar's x axis. */
+  /** Mounted upside down, which mirrors the radar's x axis back. */
   upsideDown: boolean;
   /** Counter-clockwise rotation of the radar in the room, in degrees. 0 faces +y. */
   rotation: number;
@@ -15,7 +18,7 @@ export interface Mount {
 export const DEFAULT_MOUNT: Mount = { upsideDown: false, rotation: 0, offset: { x: 0, y: 0 } };
 
 export function toRoom(p: Point, mount: Mount): Point {
-  const x = mount.upsideDown ? -p.x : p.x;
+  const x = mount.upsideDown ? p.x : -p.x;
   const a = (mount.rotation * Math.PI) / 180;
   const cos = Math.cos(a);
   const sin = Math.sin(a);
@@ -32,5 +35,5 @@ export function toRadar(p: Point, mount: Mount): Point {
   const cos = Math.cos(a);
   const sin = Math.sin(a);
   const x = dx * cos + dy * sin;
-  return { x: mount.upsideDown ? -x : x, y: -dx * sin + dy * cos };
+  return { x: mount.upsideDown ? x : -x, y: -dx * sin + dy * cos };
 }
