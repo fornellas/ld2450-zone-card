@@ -35,5 +35,5 @@ jobs:
       - uses: hacs/action@main
         with:
           category: plugin
-          # Topics and the brands entry are only needed for the HACS default list
-          ignore: brands topics
+          # Only needed for the HACS default list. TODO: add a README screenshot and drop "images"
+          ignore: brands images topics
