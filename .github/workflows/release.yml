@@ -25,9 +25,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # HACS validates the latest release, so this can only pass once the card is attached
+  # HACS validates the latest release, so this can only pass once the card is attached.
+  # Pre-releases never count as the latest release, so HACS would check the default branch instead.
   hacs:
     needs: release
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main
