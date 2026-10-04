@@ -13,8 +13,8 @@
     "build": "rollup -c",
     "watch": "rollup -c --watch",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "prettier --write src .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
+    "format:check": "prettier --check src .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
     "test": "vitest run",
     "check": "npm run typecheck && npm run format:check && npm test && npm run build"
   },
@@ -25,6 +25,7 @@
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-replace": "^6.0.3",
     "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
     "prettier": "^3.9.9",
     "rollup": "^4.64.0",
     "rollup-plugin-esbuild": "^6.2.1",
