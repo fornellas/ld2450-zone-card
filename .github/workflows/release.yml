@@ -1,8 +1,10 @@
 name: Release
 
+# Push a tag such as v0.1.0 to release. The release is only created once the card builds, with the card already
+# attached, so HACS never sees a release without it. Tags with a "-" (v0.1.0-beta.1) become pre-releases.
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -19,17 +21,20 @@ jobs:
       - run: npm ci
       - run: npm run check
         env:
-          VERSION: ${{ github.event.release.tag_name }}
+          VERSION: ${{ github.ref_name }}
       # HACS installs the release asset named after the repository
-      - run: gh release upload "${{ github.event.release.tag_name }}" dist/ld2450-zone-card.js --clobber
+      - run: >
+          gh release create "$GITHUB_REF_NAME" dist/ld2450-zone-card.js
+          --verify-tag --generate-notes
+          ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # HACS validates the latest release, so this can only pass once the card is attached.
+  # HACS validates the latest published release, so this can only run after it exists.
   # Pre-releases never count as the latest release, so HACS would check the default branch instead.
   hacs:
     needs: release
-    if: ${{ !github.event.release.prerelease }}
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main

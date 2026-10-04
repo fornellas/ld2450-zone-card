@@ -40,5 +40,6 @@ npm run check   # typecheck, format check, tests and build
 To try a build, copy `dist/ld2450-zone-card.js` to `/config/www/` and add the resource as in the manual installation.
 Bump `?v=` in the resource URL or clear the browser cache to load a new build.
 
-Releases: publish a GitHub release with a tag such as `v0.1.0`. The release workflow builds the card and attaches
-`ld2450-zone-card.js`, which HACS installs.
+Releases: push a tag such as `v0.1.0` (`git tag v0.1.0 && git push origin v0.1.0`). The release workflow checks and
+builds the card, then creates the GitHub release with `ld2450-zone-card.js` attached, which HACS installs. Tags with a
+`-`, such as `v0.1.0-beta.1`, become pre-releases.
