@@ -24,3 +24,14 @@ jobs:
       - run: gh release upload "${{ github.event.release.tag_name }}" dist/ld2450-zone-card.js --clobber
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # HACS validates the latest release, so this can only pass once the card is attached
+  hacs:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: hacs/action@main
+        with:
+          category: plugin
+          # Topics and the brands entry are only needed for the HACS default list
+          ignore: brands topics
