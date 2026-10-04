@@ -26,10 +26,17 @@ export interface DeviceRegistryEntry {
   name_by_user: string | null;
 }
 
+export type EntityNameType = "floor" | "area" | "parent_device" | "device" | "entity";
+
+export type EntityNameItem = { type: EntityNameType } | { type: "text"; text: string };
+
 export interface HomeAssistant {
   states: Record<string, HassEntity>;
   entities: Record<string, EntityRegistryDisplayEntry>;
   devices: Record<string, DeviceRegistryEntry>;
+  callWS<T>(msg: { type: string; [key: string]: unknown }): Promise<T>;
+  /** Name an entity from registry parts, like HA's own UI. HA 2026.4+. */
+  formatEntityName?(stateObj: HassEntity, name: EntityNameItem[], options?: { separator?: string }): string;
 }
 
 export interface LovelaceCardConfig {

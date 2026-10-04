@@ -16,7 +16,12 @@ function hass(): HomeAssistant {
   add("text.couch", "0,0;1000,0;1000,600", { ...polygon, friendly_name: "Office Couch Zone" });
   add("text.desk", "", { ...polygon, friendly_name: "Office Desk Zone" });
   add("binary_sensor.couch", "on", { friendly_name: "Office Couch Occupied", device_class: "occupancy" });
-  return { states, entities, devices: { dev1: { id: "dev1", name: "Office", name_by_user: null } } };
+  return {
+    states,
+    entities,
+    devices: { dev1: { id: "dev1", name: "Office", name_by_user: null } },
+    callWS: <T>() => Promise.resolve({ entity_id_parts: ["area", "device", "entity"] } as T),
+  };
 }
 
 async function renderCard(config: Record<string, unknown>, h: HomeAssistant): Promise<ShadowRoot> {
@@ -24,6 +29,9 @@ async function renderCard(config: Record<string, unknown>, h: HomeAssistant): Pr
   card.setConfig({ type: "custom:ld2450-zone-card", ...config });
   card.hass = h;
   document.body.appendChild(card);
+  // The first render waits for the entity ID format
+  await card.updateComplete;
+  await new Promise((resolve) => setTimeout(resolve));
   await card.updateComplete;
   return card.shadowRoot!;
 }
@@ -48,7 +56,7 @@ describe("ld2450-zone-card", () => {
   });
 
   it("explains when nothing is found", async () => {
-    const root = await renderCard({}, { states: {}, entities: {}, devices: {} });
+    const root = await renderCard({}, { ...hass(), states: {}, entities: {} });
     expect(root.textContent).toContain("No LD2450 polygon zones found");
   });
 

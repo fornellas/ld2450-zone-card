@@ -1,6 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
-import type { HomeAssistant, LovelaceCardConfig } from "./ha-types";
+import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
+import { fetchEntityIdParts } from "./naming";
 import { parsePolygon } from "./polygon";
 
 declare const __VERSION__: string;
@@ -30,12 +31,14 @@ export class Ld2450ZoneCard extends LitElement {
     _config: { state: true },
     _deviceId: { state: true },
     _zoneId: { state: true },
+    _entityIdParts: { state: true },
   };
 
   hass?: HomeAssistant;
   private _config?: Ld2450ZoneCardConfig;
   private _deviceId?: string;
   private _zoneId?: string;
+  private _entityIdParts?: EntityNameType[];
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -59,9 +62,17 @@ export class Ld2450ZoneCard extends LitElement {
     return { columns: 12, min_columns: 6, rows: "auto" };
   }
 
+  override willUpdate(): void {
+    if (this.hass !== undefined && this._entityIdParts === undefined) {
+      this._entityIdParts = [];
+      fetchEntityIdParts(this.hass).then((parts) => (this._entityIdParts = parts));
+    }
+  }
+
   override render() {
-    if (!this._config || !this.hass) return nothing;
-    const devices = discover(this.hass, this._config);
+    // Wait for the entity ID format, so device names don't change after the first render
+    if (!this._config || !this.hass || !this._entityIdParts?.length) return nothing;
+    const devices = discover(this.hass, this._config, this._entityIdParts);
     const device = devices.find((d) => d.id === this._deviceId) ?? devices[0];
     const zone = device?.zones.find((z) => z.polygon === this._zoneId) ?? device?.zones[0];
     return html`

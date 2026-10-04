@@ -12,7 +12,7 @@ interface MockEntity {
 }
 
 function mockHass(devices: Record<string, string>, entities: MockEntity[]): HomeAssistant {
-  const hass: HomeAssistant = { states: {}, entities: {}, devices: {} };
+  const hass: HomeAssistant = { states: {}, entities: {}, devices: {}, callWS: () => Promise.reject(new Error()) };
   for (const [id, name] of Object.entries(devices)) {
     hass.devices[id] = { id, name, name_by_user: null };
   }
@@ -209,6 +209,24 @@ describe("discover", () => {
     });
     expect(device.targets).toEqual([{ x: "sensor.custom_x", y: "sensor.custom_y", name: "Custom X" }]);
     expect(device.zones[0].presence).toBe("binary_sensor.lr_presence");
+  });
+
+  it("names devices and entities with the entity ID format", () => {
+    const hass = mockHass({ dev1: "Radar" }, [
+      zone("text.couch", "Radar Couch Zone"),
+      axis("sensor.t1_x", "Radar Target 1 X", "x"),
+      axis("sensor.t1_y", "Radar Target 1 Y", "y"),
+    ]);
+    const parts: Record<string, string> = { floor: "Ground", area: "Living Room", device: "Radar" };
+    hass.formatEntityName = (stateObj, items, options) =>
+      items
+        .map((item) => (item.type === "entity" ? String(stateObj.attributes.friendly_name).slice(6) : parts[item.type]))
+        .filter((n) => n !== undefined)
+        .join(options?.separator ?? " ");
+    const [device] = discover(hass, {}, ["floor", "area", "parent_device", "device", "entity"]);
+    expect(device.name).toBe("Ground Living Room Radar");
+    expect(device.zones[0].name).toBe("Couch Zone");
+    expect(device.targets[0].name).toBe("Target 1");
   });
 
   it("warns about unpaired target sensors", () => {

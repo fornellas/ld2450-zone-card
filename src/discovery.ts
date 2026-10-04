@@ -1,6 +1,7 @@
 // Find LD2450 devices, their polygon zones, presence sensors and target sensors. See FIND.md.
 
-import type { HassEntity, HomeAssistant } from "./ha-types";
+import type { EntityNameType, HassEntity, HomeAssistant } from "./ha-types";
+import { DEFAULT_ENTITY_ID_PARTS, deviceNameParts } from "./naming";
 import { POLYGON_MAX, POLYGON_MIN, isPolygonPattern } from "./polygon";
 
 export const MAX_TARGETS = 3;
@@ -21,6 +22,7 @@ export interface Zone {
 
 export interface Ld2450Device {
   id: string;
+  /** Fully qualified name, following the entity ID format setting, e.g. "Living Room Radar". */
   name: string;
   zones: Zone[];
   targets: TargetSensors[];
@@ -67,13 +69,35 @@ function deviceName(hass: HomeAssistant, deviceId: string): string {
   return device?.name_by_user || device?.name || deviceId;
 }
 
+/** Name a device with the parts of the entity ID format, using one of its entities for context. */
+function deviceLabel(
+  hass: HomeAssistant,
+  deviceId: string,
+  entityId: string | undefined,
+  entityIdParts: EntityNameType[],
+): string {
+  const stateObj = entityId === undefined ? undefined : hass.states[entityId];
+  if (hass.formatEntityName !== undefined && stateObj !== undefined) {
+    const parts = deviceNameParts(entityIdParts).map((type) => ({ type }));
+    const label = hass.formatEntityName(stateObj, parts, { separator: " " }).trim();
+    if (label !== "") return label;
+  }
+  return deviceName(hass, deviceId);
+}
+
 function friendlyName(hass: HomeAssistant, entityId: string): string {
   const name = hass.states[entityId]?.attributes.friendly_name;
   return typeof name === "string" && name !== "" ? name : entityId;
 }
 
-/** Friendly name without the device name prefix, as HA shows entity names in device context. */
+/** The entity's own name, as HA shows entity names in device context. */
 function entityName(hass: HomeAssistant, entityId: string, devName: string): string {
+  const stateObj = hass.states[entityId];
+  if (hass.formatEntityName !== undefined && stateObj !== undefined) {
+    const name = hass.formatEntityName(stateObj, [{ type: "entity" }]).trim();
+    if (name !== "") return name;
+  }
+  // Older HA: strip the device name from the friendly name
   const name = friendlyName(hass, entityId);
   if (name.toLowerCase().startsWith(devName.toLowerCase() + " ")) {
     const stripped = name.slice(devName.length + 1).trim();
@@ -183,7 +207,11 @@ function pairPresence(hass: HomeAssistant, zones: Zone[], entityIds: string[], d
 }
 
 /** Find all LD2450 devices with polygon zones. Config overrides always win over auto-detection. */
-export function discover(hass: HomeAssistant, overrides: DiscoveryOverrides = {}): Ld2450Device[] {
+export function discover(
+  hass: HomeAssistant,
+  overrides: DiscoveryOverrides = {},
+  entityIdParts: EntityNameType[] = DEFAULT_ENTITY_ID_PARTS,
+): Ld2450Device[] {
   const deviceOf = (entityId: string) => hass.entities?.[entityId]?.device_id ?? undefined;
 
   const zoneIds = new Set(
@@ -239,7 +267,7 @@ export function discover(hass: HomeAssistant, overrides: DiscoveryOverrides = {}
         : findTargets(hass, entityIds, name, warnings);
     if (targets.length === 0) warnings.push('No target X/Y sensors found. Set "targets" in the card config.');
 
-    devices.push({ id, name, zones, targets, warnings });
+    devices.push({ id, name: deviceLabel(hass, id, polygonIds[0], entityIdParts), zones, targets, warnings });
   }
   devices.sort((a, b) => a.name.localeCompare(b.name));
   return devices;
