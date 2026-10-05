@@ -14,6 +14,7 @@ function hass(states: Record<string, string>): HomeAssistant {
     devices: {},
     config: { unit_system: { length: "km" } },
     connection: { subscribeMessage: () => Promise.reject(new Error()) },
+    callService: () => Promise.resolve(),
     callWS: () => Promise.reject(new Error()),
   };
 }

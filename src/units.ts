@@ -4,6 +4,18 @@ export type Units = "metric" | "imperial";
 
 const MM_PER_FOOT = 304.8;
 
+/** Grid size until the user sets one, in mm: 25 cm or 1 ft. */
+export const DEFAULT_GRID: Record<Units, number> = { metric: 250, imperial: MM_PER_FOOT };
+
+/** Grid sizes the user can set, in mm. */
+export const MIN_GRID = 10;
+export const MAX_GRID = 5000;
+
+// Most grid lines and labels across the map, so a small grid size stays readable
+const MAX_LINES = 80;
+const MAX_LABELS = 14;
+const MULTIPLES = [1, 2, 4, 5, 10, 20, 40, 50, 100, 200, 400, 500, 1000];
+
 export interface GridSpacing {
   /** Distance between grid lines, in mm. */
   minor: number;
@@ -11,13 +23,31 @@ export interface GridSpacing {
   major: number;
 }
 
-export function gridSpacing(units: Units): GridSpacing {
-  return units === "metric" ? { minor: 500, major: 1000 } : { minor: MM_PER_FOOT, major: 5 * MM_PER_FOOT };
+/** Whether a length reads well as a label: 1, 2, 2.5 or 5 times a power of ten, in metres or feet. */
+function isRound(mm: number, units: Units): boolean {
+  const value = mm / (units === "metric" ? 1000 : MM_PER_FOOT);
+  const mantissa = value / 10 ** Math.floor(Math.log10(value) + 1e-9);
+  return [1, 2, 2.5, 5, 10].some((m) => Math.abs(mantissa - m) < 1e-6);
 }
 
-/** A grid label: "2 m" or "10 ft". */
+/**
+ * Grid lines for a grid size over a map of the given size (mm). Lines are skipped when they'd be too dense, and
+ * labels go on round values when the grid allows it.
+ */
+export function gridSpacing(grid: number, size: number, units: Units): GridSpacing {
+  const last = MULTIPLES[MULTIPLES.length - 1];
+  const minor = grid * (MULTIPLES.find((m) => size / (grid * m) <= MAX_LINES) ?? last);
+  const fits = MULTIPLES.filter((m) => size / (minor * m) <= MAX_LABELS);
+  const major = minor * (fits.find((m) => isRound(minor * m, units)) ?? fits[0] ?? last);
+  return { minor, major };
+}
+
+/** A grid label: "2 m", "0.75 m" or "10 ft". */
 export function formatGridLabel(mm: number, units: Units): string {
-  return units === "metric" ? `${Math.round(mm / 100) / 10} m` : `${Math.round(mm / MM_PER_FOOT)} ft`;
+  // "+ 0" turns -0 into 0
+  return units === "metric"
+    ? `${Number((mm / 1000).toFixed(2)) + 0} m`
+    : `${Number((mm / MM_PER_FOOT).toFixed(1)) + 0} ft`;
 }
 
 /** A length for display: "1.25 m" or "4′ 1″". */
@@ -47,9 +77,4 @@ export function toInputValue(mm: number, units: Units): number {
 /** A value from an input in metres or feet, in whole mm. */
 export function fromInputValue(value: number, units: Units): number {
   return Math.round(units === "metric" ? value * 1000 : value * MM_PER_FOOT);
-}
-
-/** Step to snap edited points to, in mm: 10 cm or 6 inches. */
-export function snapStep(units: Units): number {
-  return units === "metric" ? 100 : MM_PER_FOOT / 2;
 }

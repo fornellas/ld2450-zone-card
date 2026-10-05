@@ -42,6 +42,12 @@ export interface HomeAssistant {
       msg: { type: string; [key: string]: unknown },
     ): Promise<() => void>;
   };
+  callService(
+    domain: string,
+    service: string,
+    serviceData?: Record<string, unknown>,
+    target?: { entity_id: string },
+  ): Promise<unknown>;
   callWS<T>(msg: { type: string; [key: string]: unknown }): Promise<T>;
   /** Name an entity from registry parts, like HA's own UI. HA 2026.4+. */
   formatEntityName?(stateObj: HassEntity, name: EntityNameItem[], options?: { separator?: string }): string;

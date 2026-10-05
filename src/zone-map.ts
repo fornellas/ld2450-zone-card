@@ -13,7 +13,7 @@ export interface MapZone {
   occupied: boolean;
 }
 import { DEFAULT_MOUNT, type Mount, toRadar, toRoom } from "./transform";
-import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
+import { DEFAULT_GRID, type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
 const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
@@ -44,7 +44,8 @@ const pointsAttr = (points: Point[]) => points.map((p) => `${p.x},${-p.y}`).join
 /** Multiples of step within [min, max]. */
 function steps(min: number, max: number, step: number): number[] {
   const values: number[] = [];
-  for (let v = Math.ceil(min / step) * step; v <= max; v += step) values.push(v);
+  // Multiply rather than add, so steps such as 304.8 mm don't drift
+  for (let i = Math.ceil(min / step); i * step <= max; i++) values.push(i * step);
   return values;
 }
 
@@ -65,7 +66,8 @@ export class Ld2450ZoneMap extends LitElement {
     deviceOutline: { attribute: false },
     outside: { attribute: false },
     selectedVertex: { attribute: false },
-    snapStep: { attribute: false },
+    grid: { attribute: false },
+    snapToGrid: { type: Boolean },
   };
 
   mount: Mount = DEFAULT_MOUNT;
@@ -80,8 +82,10 @@ export class Ld2450ZoneMap extends LitElement {
   /** Indexes of draft points outside the limits. */
   outside: number[] = [];
   selectedVertex?: number;
-  /** Snap edited points to multiples of this, in room mm. 0 doesn't snap. */
-  snapStep = 0;
+  /** Grid size, in mm. */
+  grid = DEFAULT_GRID.metric;
+  /** Snap edited points to the grid, in room coordinates. */
+  snapToGrid = false;
 
   /** Size of a point handle, in room mm. */
   private _handle = 100;
@@ -145,7 +149,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _renderGrid(view: Extent, font: number) {
-    const { minor, major } = gridSpacing(this.units);
+    const { minor, major } = gridSpacing(this.grid, Math.max(view.maxX - view.minX, view.maxY - view.minY), this.units);
     const isMajor = (v: number) => Math.abs(v / major - Math.round(v / major)) < 1e-6;
     const lineClass = (v: number) => (Math.abs(v) < 1e-6 ? "axis" : isMajor(v) ? "major" : "minor");
     const xs = steps(view.minX, view.maxX, minor);
@@ -219,10 +223,16 @@ export class Ld2450ZoneMap extends LitElement {
   private _renderEditor(font: number) {
     const points = this.draft.map((p) => toRoom(p, this.mount));
     const selected = this.zones.find((z) => z.selected);
-    const classes = ["zone", "selected", "editing", selected?.occupied ? "occupied" : ""].join(" ");
     const outline = this.deviceOutline?.map((p) => toRoom(p, this.mount));
+    // Occupancy comes from the device's polygon: show it there, and not on changes the device doesn't have yet
+    const occupied = selected?.occupied ? "occupied" : "";
+    const classes = ["zone", "selected", "editing", outline === undefined ? occupied : ""].join(" ");
     return svg`
-      ${outline !== undefined && outline.length > 0 ? svg`<polygon class="device-outline" points=${pointsAttr(outline)}></polygon>` : nothing}
+      ${
+        outline !== undefined && outline.length > 0
+          ? svg`<polygon class=${`device-outline ${occupied}`} points=${pointsAttr(outline)}></polygon>`
+          : nothing
+      }
       <g class=${classes}>
         ${
           points.length >= 3
@@ -277,7 +287,7 @@ export class Ld2450ZoneMap extends LitElement {
 
   /** A point from the user, snapped in room coordinates, as radar coordinates. */
   private _toDraftPoint(room: Point): Point {
-    return toRadar(snap(room, this.snapStep), this.mount);
+    return toRadar(snap(room, this.snapToGrid ? this.grid : 0), this.mount);
   }
 
   private _emit<T>(name: string, detail: T): void {
@@ -451,6 +461,11 @@ export class Ld2450ZoneMap extends LitElement {
       stroke: var(--green-color, #4caf50);
       stroke-width: 1.5;
       stroke-dasharray: 2 4;
+    }
+    .device-outline.occupied {
+      fill: var(--yellow-color, #ffeb3b);
+      fill-opacity: 0.45;
+      stroke: var(--secondary-text-color);
     }
     svg.editable {
       cursor: crosshair;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertionIndex, snap } from "./geometry";
+import { insertionIndex, insidePolygon, snap } from "./geometry";
 import { checkPolygon, formatPolygon } from "./polygon";
 import { formatRoomText, parseRoomText } from "./polygon-text";
 
@@ -23,7 +23,7 @@ describe("formatPolygon", () => {
 
 describe("checkPolygon", () => {
   it("accepts an empty polygon, which disables the zone", () => {
-    expect(checkPolygon([])).toEqual({ errors: [], outside: [] });
+    expect(checkPolygon([])).toEqual({ errors: [], warnings: [], outside: [] });
   });
 
   it("needs at least 3 points", () => {
@@ -39,6 +39,13 @@ describe("checkPolygon", () => {
     const check = checkPolygon([...square, { x: 5000, y: 100 }, { x: 0, y: -1 }]);
     expect(check.outside).toEqual([4, 5]);
     expect(check.errors).toEqual(["Points 5, 6 are outside the zone point limits."]);
+  });
+
+  it("warns about points outside the tracking range", () => {
+    const check = checkPolygon(square, (p) => p.x < 1000);
+    expect(check.errors).toEqual([]);
+    expect(check.warnings).toEqual(["Points 2, 3 are outside the tracking range, where the radar can't see anyone."]);
+    expect(check.outside).toEqual([1, 2]);
   });
 
   it("checks the rounded values, as sent", () => {
@@ -75,6 +82,13 @@ describe("geometry", () => {
   it("appends when no edge is close", () => {
     expect(insertionIndex(square, { x: 500, y: 500 }, 50)).toBe(4);
     expect(insertionIndex(square.slice(0, 2), { x: 500, y: 500 }, 50)).toBe(2);
+  });
+
+  it("tells points inside a polygon, including its edges", () => {
+    expect(insidePolygon({ x: 500, y: 500 }, square)).toBe(true);
+    expect(insidePolygon({ x: 1000, y: 500 }, square)).toBe(true);
+    expect(insidePolygon({ x: 1001.5, y: 500 }, square)).toBe(false);
+    expect(insidePolygon({ x: -1, y: -1 }, square)).toBe(false);
   });
 
   it("snaps to a step", () => {

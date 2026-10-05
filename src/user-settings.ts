@@ -9,6 +9,8 @@ export interface UserSettings {
   units?: Units;
   /** Snap edited points to the grid. */
   snap?: boolean;
+  /** Grid size for each unit system, in mm. */
+  grid?: Partial<Record<Units, number>>;
 }
 
 export async function fetchUserSettings(hass: HomeAssistant): Promise<UserSettings> {

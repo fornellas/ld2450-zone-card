@@ -1,5 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
+import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
+import { insidePolygon } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
 import { POLYGON_MAX_POINTS, type Point, checkPolygon, formatPolygon, parsePolygon } from "./polygon";
@@ -13,11 +15,21 @@ import {
   withDeviceMount,
 } from "./system-settings";
 import { type Mount, toRadar, toRoom } from "./transform";
-import { type Units, defaultUnits, snapStep } from "./units";
+import {
+  DEFAULT_GRID,
+  MAX_GRID,
+  MIN_GRID,
+  type Units,
+  defaultUnits,
+  fromInputValue,
+  inputUnit,
+  toInputValue,
+} from "./units";
 import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
 
+// Settings are saved once edits settle for this long
 const SAVE_DELAY_MS = 500;
 
 declare const __VERSION__: string;
@@ -50,7 +62,10 @@ export class Ld2450ZoneCard extends LitElement {
     _entityIdParts: { state: true },
     _userSettings: { state: true },
     _systemSettings: { state: true },
-    _saveError: { state: true },
+    _mountError: { state: true },
+    _gridText: { state: true },
+    _saving: { state: true },
+    _saveResult: { state: true },
     _drafts: { state: true },
     _selectedVertex: { state: true },
     _text: { state: true },
@@ -65,7 +80,18 @@ export class Ld2450ZoneCard extends LitElement {
   private _systemSettings?: SystemSettings;
   private _unsubscribeSystem?: Promise<() => void>;
   private _saveTimer?: ReturnType<typeof setTimeout>;
-  private _saveError?: string;
+  private _mountError?: string;
+  /** The grid size while the user is typing it. */
+  private _gridText?: string;
+  private _gridSaveTimer?: ReturnType<typeof setTimeout>;
+  /** The polygon being written to a zone, until the device publishes it back. */
+  private _saving?: { zone: string; value: string };
+  private _savingTimer?: ReturnType<typeof setTimeout>;
+  /** How the last write went, for the zone it was written to. */
+  private _saveResult?: { zone: string; ok: boolean; message: string };
+
+  /** How long the device has to publish a written polygon back before the write counts as rejected. */
+  static saveTimeoutMs = 5000;
   /** Edited polygons not yet written to the device, in radar coordinates, by zone entity. */
   private _drafts: Record<string, Point[]> = {};
   private _selectedVertex?: number;
@@ -95,6 +121,7 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   override willUpdate(): void {
+    this._checkSaved();
     if (this.hass !== undefined && this._entityIdParts === undefined) {
       this._entityIdParts = [];
       fetchEntityIdParts(this.hass).then((parts) => (this._entityIdParts = parts));
@@ -125,17 +152,18 @@ export class Ld2450ZoneCard extends LitElement {
     super.disconnectedCallback();
     this._unsubscribeSystem?.then((unsubscribe) => unsubscribe()).catch(() => undefined);
     this._unsubscribeSystem = undefined;
+    clearTimeout(this._savingTimer);
   }
 
   private _mountChanged(deviceId: string, mount: Mount): void {
     this._systemSettings = withDeviceMount(this._systemSettings ?? {}, deviceId, mount);
-    this._saveError = undefined;
+    this._mountError = undefined;
     clearTimeout(this._saveTimer);
     // Typing in a number field fires a change per step; save once it settles
     this._saveTimer = setTimeout(() => {
       this._saveTimer = undefined;
       saveSystemSettings(this.hass!, this._systemSettings!).catch((err) => {
-        this._saveError = `Could not save the radar position: ${err?.message ?? err}`;
+        this._mountError = `Could not save the radar position: ${err?.message ?? err}`;
       });
     }, SAVE_DELAY_MS);
   }
@@ -197,6 +225,18 @@ export class Ld2450ZoneCard extends LitElement {
         </label>
       </div>
       <div class="toolbar">
+        <label class="grid">
+          Grid (${inputUnit(this._units)})
+          <input
+            type="number"
+            min=${toInputValue(MIN_GRID, this._units)}
+            max=${toInputValue(MAX_GRID, this._units)}
+            step=${this._units === "metric" ? 0.05 : 0.25}
+            .value=${this._gridText ?? String(toInputValue(this._grid, this._units))}
+            @input=${this._gridInput}
+            @change=${() => (this._gridText = undefined)}
+          />
+        </label>
         <div class="segmented" role="group" aria-label="Units">
           ${(["metric", "imperial"] as const).map(
             (u) =>
@@ -214,7 +254,7 @@ export class Ld2450ZoneCard extends LitElement {
           ?disabled=${!this.hass!.user?.is_admin || this._systemSettings === undefined}
           @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
         ></ld2450-mount-editor>
-        ${this._saveError === undefined ? nothing : html`<p class="error">${this._saveError}</p>`}
+        ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
       </details>
       <ld2450-zone-map
         .mount=${mount}
@@ -231,7 +271,8 @@ export class Ld2450ZoneCard extends LitElement {
         .deviceOutline=${editing?.dirty ? editing.devicePoints : undefined}
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
-        .snapStep=${this._snap ? snapStep(this._units) : 0}
+        .grid=${this._grid}
+        ?snapToGrid=${this._snap}
         @draft-changed=${(ev: CustomEvent<Point[]>) => zone && this._setDraft(zone, ev.detail)}
         @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
       ></ld2450-zone-map>
@@ -261,7 +302,7 @@ export class Ld2450ZoneCard extends LitElement {
       devicePoints,
       deviceState,
       dirty: draft !== undefined && formatPolygon(draft) !== deviceState,
-      check: checkPolygon(points),
+      check: checkPolygon(points, (p) => insidePolygon(p, DETECTION_AREA)),
     };
   }
 
@@ -275,6 +316,14 @@ export class Ld2450ZoneCard extends LitElement {
       );
     const deviceValue = formatPolygon(points);
     const full = points.length >= POLYGON_MAX_POINTS;
+    const saving = this._saving?.zone === zone.polygon;
+    const result = this._saveResult?.zone === zone.polygon ? this._saveResult : undefined;
+    const canSave =
+      editing.dirty &&
+      check.errors.length === 0 &&
+      this._text?.error === undefined &&
+      editing.devicePoints !== undefined &&
+      this._saving === undefined;
     return html`
       <div class="editor">
         <p class="help">
@@ -298,8 +347,21 @@ export class Ld2450ZoneCard extends LitElement {
             Delete point
           </button>
           <button ?disabled=${points.length === 0} @click=${() => this._setDraft(zone, [])}>Clear</button>
-          <button ?disabled=${!editing.dirty} @click=${() => this._revert(zone)}>Revert</button>
+          <button ?disabled=${!editing.dirty || saving} @click=${() => this._revert(zone)}>Revert</button>
+          <button class="save" ?disabled=${!canSave} @click=${() => this._save(zone, deviceValue)}>
+            ${saving ? "Saving…" : "Save"}
+          </button>
         </div>
+        ${
+          result === undefined
+            ? nothing
+            : html`<p class=${result.ok ? "saved" : "error"} role="status">${result.message}</p>`
+        }
+        ${
+          editing.devicePoints === undefined
+            ? html`<p class="error">The device is ${editing.deviceState}, so changes can't be saved now.</p>`
+            : nothing
+        }
         <label class="points">
           Points (x,y in ${textUnit(this._units)}, room coordinates)
           <textarea
@@ -326,13 +388,95 @@ export class Ld2450ZoneCard extends LitElement {
                 ${check.errors.map((e) => html`<li>${e}</li>`)}
               </ul>`
         }
+        ${
+          check.warnings.length === 0
+            ? nothing
+            : html`<ul class="edit-warnings">
+                ${check.warnings.map((w) => html`<li>${w}</li>`)}
+              </ul>`
+        }
       </div>
     `;
+  }
+
+  /** Write the polygon to the device; it's saved once the device publishes the same value back. */
+  private async _save(zone: Zone, value: string): Promise<void> {
+    this._saving = { zone: zone.polygon, value };
+    this._saveResult = undefined;
+    try {
+      await this.hass!.callService("text", "set_value", { value }, { entity_id: zone.polygon });
+    } catch (err) {
+      this._saving = undefined;
+      this._saveResult = {
+        zone: zone.polygon,
+        ok: false,
+        message: `Not saved: ${(err as Error)?.message ?? err}. Your changes are kept.`,
+      };
+      return;
+    }
+    this._checkSaved();
+    if (this._saving?.zone !== zone.polygon) return;
+    // A rejected polygon makes the device publish its old one again, which HA sees as no change at all
+    this._savingTimer = setTimeout(() => {
+      if (this._saving?.zone !== zone.polygon || this._saving.value !== value) return;
+      this._saving = undefined;
+      const kept = this.hass?.states[zone.polygon]?.state;
+      this._saveResult = {
+        zone: zone.polygon,
+        ok: false,
+        message:
+          `Not saved: the device didn't accept the polygon` +
+          (kept === undefined ? "." : `, and kept "${kept === "" ? "(empty)" : kept}".`) +
+          " Your changes are kept, so you can fix them and save again.",
+      };
+    }, Ld2450ZoneCard.saveTimeoutMs);
+  }
+
+  /** Whether the device has published the polygon being saved. */
+  private _checkSaved(): void {
+    const saving = this._saving;
+    if (saving === undefined || this.hass?.states[saving.zone]?.state !== saving.value) return;
+    clearTimeout(this._savingTimer);
+    this._saving = undefined;
+    this._saveResult = { zone: saving.zone, ok: true, message: "Saved to the device." };
+    // Drop the draft, unless it changed while saving
+    const draft = this._drafts[saving.zone];
+    if (draft !== undefined && formatPolygon(draft) === saving.value) {
+      const { [saving.zone]: _, ...rest } = this._drafts;
+      this._drafts = rest;
+      this._text = undefined;
+    }
+  }
+
+  private get _grid(): number {
+    return this._userSettings?.grid?.[this._units] ?? DEFAULT_GRID[this._units];
+  }
+
+  private _gridInput(ev: Event): void {
+    const text = (ev.target as HTMLInputElement).value;
+    const value = Number(text);
+    if (text.trim() === "" || !Number.isFinite(value)) return;
+    const grid = fromInputValue(value, this._units);
+    if (grid < MIN_GRID || grid > MAX_GRID) return;
+    this._gridText = text;
+    this._userSettings = {
+      ...this._userSettings,
+      grid: { ...this._userSettings?.grid, [this._units]: grid },
+    };
+    clearTimeout(this._gridSaveTimer);
+    this._gridSaveTimer = setTimeout(
+      () =>
+        saveUserSettings(this.hass!, this._userSettings!).catch((err) =>
+          console.warn("ld2450-zone-card: could not save user settings", err),
+        ),
+      SAVE_DELAY_MS,
+    );
   }
 
   private _setDraft(zone: Zone, points: Point[]): void {
     this._drafts = { ...this._drafts, [zone.polygon]: points };
     this._text = undefined;
+    this._saveResult = undefined;
     if (this._selectedVertex !== undefined && this._selectedVertex >= points.length) this._selectedVertex = undefined;
   }
 
@@ -351,6 +495,7 @@ export class Ld2450ZoneCard extends LitElement {
     this._drafts = rest;
     this._text = undefined;
     this._selectedVertex = undefined;
+    this._saveResult = undefined;
   }
 
   private _textInput(zone: Zone, mount: Mount, value: string): void {
@@ -362,6 +507,7 @@ export class Ld2450ZoneCard extends LitElement {
     }
     this._drafts = { ...this._drafts, [zone.polygon]: parsed.map((p) => toRadar(p, mount)) };
     this._text = { value };
+    this._saveResult = undefined;
     this._selectedVertex = undefined;
   }
 
@@ -442,8 +588,22 @@ export class Ld2450ZoneCard extends LitElement {
   static override styles = css`
     .toolbar {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 12px;
       margin: 12px 0 8px;
+    }
+    label.grid {
+      flex: 0 1 110px;
+    }
+    label.grid input {
+      padding: 4px 8px;
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color);
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      min-width: 0;
     }
     .segmented {
       display: inline-flex;
@@ -595,6 +755,25 @@ export class Ld2450ZoneCard extends LitElement {
       color: var(--secondary-text-color);
     }
     .dirty {
+      color: var(--warning-color);
+    }
+    .edit-toolbar button.save {
+      color: var(--text-primary-color);
+      background: var(--primary-color);
+      border-color: var(--primary-color);
+    }
+    .edit-toolbar button.save:disabled {
+      color: var(--disabled-text-color, #bdbdbd);
+      background: none;
+      border-color: var(--divider-color);
+    }
+    .saved {
+      margin: 8px 0 0;
+      color: var(--success-color, #43a047);
+    }
+    .edit-warnings {
+      margin: 8px 0 0;
+      padding-left: 20px;
       color: var(--warning-color);
     }
     .errors {

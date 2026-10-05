@@ -2,15 +2,18 @@
 import { describe, expect, it } from "vitest";
 import type { HomeAssistant } from "./ha-types";
 import "./ld2450-zone-card";
-import type { Ld2450ZoneCard } from "./ld2450-zone-card";
+import { Ld2450ZoneCard } from "./ld2450-zone-card";
 import { POLYGON_PATTERN } from "./polygon";
 
 let calls: { type: string; [key: string]: unknown }[] = [];
 let systemData: unknown = null;
+let onService: (data: Record<string, unknown>, target?: { entity_id: string }) => Promise<unknown> = () =>
+  Promise.resolve();
 
 function hass(): HomeAssistant {
   calls = [];
   systemData = null;
+  onService = () => Promise.resolve();
   const states: HomeAssistant["states"] = {};
   const entities: HomeAssistant["entities"] = {};
   const add = (entity_id: string, state: string, attributes: Record<string, unknown>) => {
@@ -45,6 +48,10 @@ function hass(): HomeAssistant {
         callback({ value: systemData } as T);
         return Promise.resolve(() => undefined);
       },
+    },
+    callService: (domain: string, service: string, data?: Record<string, unknown>, target?: { entity_id: string }) => {
+      calls.push({ type: `${domain}.${service}`, ...data, ...target });
+      return onService(data ?? {}, target);
     },
     callWS: <T>(msg: { type: string; [key: string]: unknown }) => {
       calls.push(msg);
@@ -223,6 +230,67 @@ describe("ld2450-zone-card", () => {
       root.querySelector("ld2450-zone-map")!.dispatchEvent(new CustomEvent("draft-changed", { detail: draft }));
       await update();
       expect(deviceValue()).toBe("0,0;500,0;500,500");
+    });
+
+    describe("saving", () => {
+      async function editAndSave() {
+        const env = await edit();
+        await env.type("0,0;2000,0;2000,600");
+        const card = env.root.host as Ld2450ZoneCard;
+        return { ...env, card };
+      }
+
+      it("writes the polygon and confirms when the device publishes it", async () => {
+        const { card, button, update, root, deviceValue } = await editAndSave();
+        onService = (data, target) => {
+          // The device accepts it and publishes it back
+          const states = { ...card.hass!.states };
+          states[target!.entity_id] = { ...states[target!.entity_id], state: String(data.value) };
+          setTimeout(() => (card.hass = { ...card.hass!, states }));
+          return Promise.resolve();
+        };
+        button("Save").click();
+        await update();
+        expect(calls).toContainEqual({ type: "text.set_value", value: "0,0;2000,0;2000,600", entity_id: "text.couch" });
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        await update();
+        expect(root.querySelector(".saved")!.textContent).toContain("Saved");
+        expect(root.querySelector(".dirty")).toBeNull();
+        expect(deviceValue()).toBe("0,0;2000,0;2000,600");
+        expect(button("Save").disabled).toBe(true);
+      });
+
+      it("keeps the changes when the device rejects them", async () => {
+        Ld2450ZoneCard.saveTimeoutMs = 20;
+        try {
+          const { button, update, root, deviceValue } = await editAndSave();
+          button("Save").click();
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          await update();
+          expect(root.querySelector("p.error")!.textContent).toContain('kept "0,0;1000,0;1000,600"');
+          expect(deviceValue()).toBe("0,0;2000,0;2000,600");
+          expect(root.querySelector(".dirty")).not.toBeNull();
+          expect(button("Save").disabled).toBe(false);
+        } finally {
+          Ld2450ZoneCard.saveTimeoutMs = 5000;
+        }
+      });
+
+      it("keeps the changes when HA refuses them", async () => {
+        const { button, update, root, deviceValue } = await editAndSave();
+        onService = () => Promise.reject(new Error("Value does not match pattern"));
+        button("Save").click();
+        await new Promise((resolve) => setTimeout(resolve));
+        await update();
+        expect(root.querySelector("p.error")!.textContent).toContain("Value does not match pattern");
+        expect(deviceValue()).toBe("0,0;2000,0;2000,600");
+      });
+
+      it("can't save polygons the device would reject", async () => {
+        const { type, button } = await edit();
+        await type("0,0;6000,0;0,600");
+        expect(button("Save").disabled).toBe(true);
+      });
     });
 
     it("shows room coordinates and writes radar coordinates", async () => {

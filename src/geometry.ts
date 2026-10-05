@@ -35,3 +35,15 @@ export function snap(p: Point, step: number): Point {
   if (step <= 0) return p;
   return { x: Math.round(p.x / step) * step + 0, y: Math.round(p.y / step) * step + 0 };
 }
+
+/** Whether p is inside the polygon (even-odd rule) or on its edge, within tolerance. */
+export function insidePolygon(p: Point, polygon: Point[], tolerance = 1): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const a = polygon[i];
+    const b = polygon[j];
+    if (distanceToSegment(p, a, b) <= tolerance) return true;
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}

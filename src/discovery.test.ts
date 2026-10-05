@@ -18,6 +18,7 @@ function mockHass(devices: Record<string, string>, entities: MockEntity[]): Home
     devices: {},
     config: { unit_system: { length: "km" } },
     connection: { subscribeMessage: () => Promise.reject(new Error()) },
+    callService: () => Promise.resolve(),
     callWS: () => Promise.reject(new Error()),
   };
   for (const [id, name] of Object.entries(devices)) {
