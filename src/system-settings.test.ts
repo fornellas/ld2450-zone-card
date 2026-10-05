@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deviceMount, withDeviceMount } from "./system-settings";
+import { deviceFloorPlan, deviceMount, withDeviceMount, withFloorPlan } from "./system-settings";
 import { DEFAULT_MOUNT } from "./transform";
 
 describe("system settings", () => {
@@ -28,6 +28,19 @@ describe("system settings", () => {
       rotation: 10,
       offset: { x: 1, y: 2 },
     });
+  });
+
+  it("reads and sets a device's floor plan", () => {
+    const plan = [
+      { x: 0, y: 0 },
+      { x: 1000, y: 0 },
+      { x: 1000, y: 1000 },
+    ];
+    const settings = withFloorPlan({ mounts: {} }, "dev1", plan);
+    expect(deviceFloorPlan(settings, "dev1")).toEqual(plan);
+    expect(deviceFloorPlan(settings, "dev2")).toEqual([]);
+    expect(deviceFloorPlan({ floorPlans: { dev1: [{ x: "a" }] as never } }, "dev1")).toEqual([]);
+    expect(settings.mounts).toEqual({});
   });
 
   it("sets a device's mount without touching others", () => {

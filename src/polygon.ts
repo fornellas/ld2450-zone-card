@@ -64,6 +64,21 @@ export function parsePolygon(state: string): Point[] | undefined {
   return points;
 }
 
+/** Most points a floor plan can have. It's only stored by HA, so this just keeps it reasonable. */
+export const FLOOR_PLAN_MAX_POINTS = 100;
+
+/** Check a floor plan. An empty one removes it. */
+export function checkFloorPlan(points: Point[]): PolygonCheck {
+  const errors: string[] = [];
+  if (points.length > 0 && points.length < POLYGON_MIN_POINTS) {
+    errors.push(`A floor plan needs at least ${POLYGON_MIN_POINTS} points.`);
+  }
+  if (points.length > FLOOR_PLAN_MAX_POINTS) {
+    errors.push(`A floor plan can have at most ${FLOOR_PLAN_MAX_POINTS} points.`);
+  }
+  return { errors, warnings: [], outside: [] };
+}
+
 /** The canonical text the device stores and publishes: whole mm, no spaces. */
 export function formatPolygon(points: Point[]): string {
   return points.map((p) => `${Math.round(p.x) + 0},${Math.round(p.y) + 0}`).join(";");

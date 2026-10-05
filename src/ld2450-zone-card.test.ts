@@ -81,7 +81,7 @@ describe("ld2450-zone-card", () => {
     const root = await renderCard({}, hass());
     const selects = root.querySelectorAll("select");
     expect([...selects[0].options].map((o) => o.textContent)).toEqual(["Office"]);
-    expect([...selects[1].options].map((o) => o.textContent)).toEqual(["Couch Zone", "Desk Zone"]);
+    expect([...selects[1].options].map((o) => o.textContent)).toEqual(["Couch Zone", "Desk Zone", "Floor plan"]);
     expect(root.textContent).toContain("3 points");
     expect(root.textContent).toContain("binary_sensor.couch");
   });
@@ -338,6 +338,91 @@ describe("ld2450-zone-card", () => {
       type: "frontend/set_user_data",
       key: "ld2450_zone_card",
       value: { snapStep: { metric: 50 } },
+    });
+  });
+
+  describe("floor plan", () => {
+    async function editFloorPlan(h = hass()) {
+      const root = await renderCard({}, h);
+      const card = root.host as Ld2450ZoneCard;
+      const select = root.querySelectorAll("select")[1];
+      select.value = "floor-plan";
+      select.dispatchEvent(new Event("change"));
+      await card.updateComplete;
+      const textarea = root.querySelector("textarea")!;
+      textarea.value = "-3000,-500;3000,-500;3000,6000;-3000,6000";
+      textarea.dispatchEvent(new Event("input"));
+      await card.updateComplete;
+      const save = [...root.querySelectorAll(".edit-toolbar button")].find((b) =>
+        b.textContent!.includes("Save"),
+      ) as HTMLButtonElement;
+      return { root, card, save };
+    }
+
+    it("is edited in room coordinates and saved for everyone", async () => {
+      const h = hass();
+      systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
+      const { root, card, save } = await editFloorPlan(h);
+      // Floor plans aren't written to the device
+      expect(root.querySelector(".device-value")).toBeNull();
+      expect(root.querySelector(".status")!.textContent).toContain("4 points");
+      save.click();
+      await new Promise((resolve) => setTimeout(resolve));
+      await card.updateComplete;
+      expect(calls).toContainEqual({
+        type: "frontend/set_system_data",
+        key: "ld2450_zone_card",
+        value: {
+          mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } },
+          floorPlans: {
+            dev1: [
+              { x: -3000, y: -500 },
+              { x: 3000, y: -500 },
+              { x: 3000, y: 6000 },
+              { x: -3000, y: 6000 },
+            ],
+          },
+        },
+      });
+      expect(root.querySelector(".saved")!.textContent).toContain("Floor plan saved");
+      expect(root.querySelector(".dirty")).toBeNull();
+      // Its room coordinates don't depend on the radar position
+      expect(root.querySelector("textarea")!.value).toBe("-3000,-500;3000,-500;3000,6000;-3000,6000");
+    });
+
+    it("can only be saved by admins", async () => {
+      const { root, save } = await editFloorPlan({ ...hass(), user: { is_admin: false } });
+      expect(save.disabled).toBe(true);
+      expect(root.textContent).toContain("Only administrators can save the floor plan");
+    });
+  });
+
+  it("shows and hides outlines per user", async () => {
+    const h = hass();
+    systemData = {
+      floorPlans: {
+        dev1: [
+          { x: 0, y: 0 },
+          { x: 1000, y: 0 },
+          { x: 1000, y: 1000 },
+        ],
+      },
+    };
+    const root = await renderCard({}, h);
+    const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & { updateComplete: Promise<unknown> };
+    await map.updateComplete;
+    expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
+    const toggles = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle input")];
+    expect(toggles).toHaveLength(3);
+    toggles[2].checked = false;
+    toggles[2].dispatchEvent(new Event("change"));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    await map.updateComplete;
+    expect(map.shadowRoot!.querySelector("polygon.floor-plan")).toBeNull();
+    expect(calls).toContainEqual({
+      type: "frontend/set_user_data",
+      key: "ld2450_zone_card",
+      value: { overlays: { floorPlan: false } },
     });
   });
 

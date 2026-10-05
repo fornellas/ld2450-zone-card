@@ -4,15 +4,26 @@ import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from 
 import { insidePolygon } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
-import { POLYGON_MAX_POINTS, type Point, checkPolygon, formatPolygon, parsePolygon } from "./polygon";
+import {
+  FLOOR_PLAN_MAX_POINTS,
+  POLYGON_MAX_POINTS,
+  type Point,
+  type PolygonCheck,
+  checkFloorPlan,
+  checkPolygon,
+  formatPolygon,
+  parsePolygon,
+} from "./polygon";
 import { formatRoomText, parseRoomText, textUnit } from "./polygon-text";
 import { readTargets } from "./targets";
 import {
   type SystemSettings,
+  deviceFloorPlan,
   deviceMount,
   saveSystemSettings,
   subscribeSystemSettings,
   withDeviceMount,
+  withFloorPlan,
 } from "./system-settings";
 import { type Mount, toRadar, toRoom } from "./transform";
 import {
@@ -25,12 +36,32 @@ import {
   inputUnit,
   toInputValue,
 } from "./units";
-import { type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
 
 // Settings are saved once edits settle for this long
 const SAVE_DELAY_MS = 500;
+
+/** The "Edit" choice for the floor plan, next to the zones. */
+const FLOOR_PLAN = "floor-plan";
+
+/** What can be edited: a zone (saved to the device) or the device's floor plan (saved in HA). */
+type Target = { kind: "zone"; key: string; zone: Zone } | { kind: "floorPlan"; key: string; device: Ld2450Device };
+
+/** The polygon being edited. */
+interface Editing {
+  /** The draft, or what's saved, in radar coordinates. */
+  points: Point[];
+  roomPoints: Point[];
+  /** What's saved, in radar coordinates; undefined when a zone's state isn't a polygon (e.g. unavailable). */
+  savedPoints?: Point[];
+  /** A zone's state on the device. */
+  deviceState?: string;
+  /** The draft differs from what's saved. */
+  dirty: boolean;
+  check: PolygonCheck;
+}
 
 declare const __VERSION__: string;
 
@@ -92,7 +123,7 @@ export class Ld2450ZoneCard extends LitElement {
 
   /** How long the device has to publish a written polygon back before the write counts as rejected. */
   static saveTimeoutMs = 5000;
-  /** Edited polygons not yet written to the device, in radar coordinates, by zone entity. */
+  /** Edited polygons not saved yet, by target key: zones in radar coordinates, floor plans in room coordinates. */
   private _drafts: Record<string, Point[]> = {};
   private _selectedVertex?: number;
   /** The polygon text while the user is typing it, with why it can't be read, if so. */
@@ -184,11 +215,10 @@ export class Ld2450ZoneCard extends LitElement {
     if (!this._config || !this.hass || !this._entityIdParts?.length) return nothing;
     const devices = discover(this.hass, this._config, this._entityIdParts);
     const device = devices.find((d) => d.id === this._deviceId) ?? devices[0];
-    const zone = device?.zones.find((z) => z.polygon === this._zoneId) ?? device?.zones[0];
     return html`
       <ha-card .header=${this._config.title ?? "LD2450 Zones"}>
         <div class="card-content">
-          ${device === undefined ? this._renderEmpty() : this._renderDevice(devices, device, zone)}
+          ${device === undefined ? this._renderEmpty() : this._renderDevice(devices, device)}
         </div>
       </ha-card>
     `;
@@ -204,9 +234,18 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
-  private _renderDevice(devices: Ld2450Device[], device: Ld2450Device, zone: Zone | undefined) {
+  /** What's selected for editing: a zone, or the device's floor plan. */
+  private _target(device: Ld2450Device): Target | undefined {
+    if (this._zoneId === FLOOR_PLAN) return { kind: "floorPlan", key: `${FLOOR_PLAN}:${device.id}`, device };
+    const zone = device.zones.find((z) => z.polygon === this._zoneId) ?? device.zones[0];
+    return zone === undefined ? undefined : { kind: "zone", key: zone.polygon, zone };
+  }
+
+  private _renderDevice(devices: Ld2450Device[], device: Ld2450Device) {
     const mount = deviceMount(this._systemSettings, device.id);
-    const editing = zone === undefined ? undefined : this._editing(zone);
+    const floorPlan = deviceFloorPlan(this._systemSettings, device.id);
+    const target = this._target(device);
+    const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
     return html`
       <div class="selectors">
@@ -220,11 +259,12 @@ export class Ld2450ZoneCard extends LitElement {
           </select>
         </label>
         <label>
-          Zone
-          <select @change=${this._zoneChanged} ?disabled=${device.zones.length === 0}>
+          Edit
+          <select @change=${this._zoneChanged}>
             ${device.zones.map(
-              (z) => html`<option value=${z.polygon} ?selected=${z.polygon === zone?.polygon}>${z.name}</option>`,
+              (z) => html`<option value=${z.polygon} ?selected=${target?.key === z.polygon}>${z.name}</option>`,
             )}
+            <option value=${FLOOR_PLAN} ?selected=${target?.kind === "floorPlan"}>Floor plan</option>
           </select>
         </label>
       </div>
@@ -251,36 +291,36 @@ export class Ld2450ZoneCard extends LitElement {
         .units=${this._units}
         .targets=${readTargets(this.hass!, device.targets)}
         ?offline=${offline}
+        .floorPlan=${floorPlan}
+        ?editingFloorPlan=${target?.kind === "floorPlan"}
+        .overlays=${this._userSettings?.overlays ?? {}}
         .zones=${device.zones.map((z) => ({
           name: z.name,
           points: parsePolygon(this.hass!.states[z.polygon]?.state ?? "") ?? [],
-          selected: z.polygon === zone?.polygon,
+          selected: target?.key === z.polygon,
           occupied: z.presence !== undefined && this.hass!.states[z.presence]?.state === "on",
         }))}
-        ?editable=${zone !== undefined}
+        ?editable=${target !== undefined}
         .draft=${editing?.points ?? []}
-        .deviceOutline=${editing?.dirty ? editing.devicePoints : undefined}
+        .deviceOutline=${editing?.dirty ? editing.savedPoints : undefined}
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
         .snapStep=${this._snap ? this._snapStep : 0}
-        @draft-changed=${(ev: CustomEvent<Point[]>) => zone && this._setDraft(zone, ev.detail)}
+        @draft-changed=${(ev: CustomEvent<Point[]>) => target && this._setDraft(target, mount, ev.detail)}
         @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
+        @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
+          this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
-      ${zone === undefined || editing === undefined ? nothing : this._renderEditor(zone, editing, offline)}
+      ${target === undefined || editing === undefined ? nothing : this._renderEditor(target, mount, editing, offline)}
       <details class="advanced">
         <summary>Advanced</summary>
-        <section>
-          <h3>Radar position</h3>
-          <ld2450-mount-editor
-            .mount=${mount}
-            .units=${this._units}
-            ?disabled=${!this.hass!.user?.is_admin || this._systemSettings === undefined}
-            @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
-          ></ld2450-mount-editor>
-          ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
-        </section>
+        ${target === undefined || editing === undefined ? nothing : this._renderPointsText(target, mount, editing)}
         <section>
           <h3>Snap grid</h3>
+          <label class="check">
+            <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
+            Snap points to the grid
+          </label>
           <label class="snap-step">
             Step (${inputUnit(this._units)})
             <input
@@ -289,16 +329,26 @@ export class Ld2450ZoneCard extends LitElement {
               max=${toInputValue(MAX_SNAP, this._units)}
               step=${this._units === "metric" ? 0.01 : 0.05}
               .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
+              ?disabled=${!this._snap}
               @input=${this._snapStepInput}
               @change=${() => (this._snapText = undefined)}
             />
           </label>
         </section>
-        ${zone === undefined || editing === undefined ? nothing : this._renderPointsText(zone, mount, editing)}
+        <section>
+          <h3>Radar position</h3>
+          <ld2450-mount-editor
+            .mount=${mount}
+            .units=${this._units}
+            ?disabled=${!this._isAdmin || this._systemSettings === undefined}
+            @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
+          ></ld2450-mount-editor>
+          ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
+        </section>
       </details>
       <details>
         <summary>Entities</summary>
-        ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}
+        ${target?.kind === "zone" ? this._renderZone(target.zone) : nothing} ${this._renderTargets(device)}
       </details>
       ${
         device.warnings.length === 0
@@ -310,70 +360,90 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
+  private get _isAdmin(): boolean {
+    return this.hass?.user?.is_admin ?? false;
+  }
+
   /** A device is offline when HA has none of its zones: they're all unavailable. */
   private _isOffline(device: Ld2450Device): boolean {
     return device.zones.length > 0 && device.zones.every((z) => this.hass!.states[z.polygon]?.state === "unavailable");
   }
 
-  /** The selected zone's polygon being edited: the draft, or what the device has. */
-  private _editing(zone: Zone) {
-    const deviceState = this.hass!.states[zone.polygon]?.state ?? "unavailable";
+  /**
+   * The polygon being edited: the draft, or what's saved. Points are in radar coordinates, as the map takes them;
+   * zone drafts are kept in radar coordinates, and floor plan drafts in room coordinates, so each stays put when the
+   * radar position changes.
+   */
+  private _editing(target: Target, mount: Mount, floorPlan: Point[]): Editing {
+    const draft = this._drafts[target.key];
+    if (target.kind === "floorPlan") {
+      const room = draft ?? floorPlan;
+      return {
+        points: room.map((p) => toRadar(p, mount)),
+        roomPoints: room,
+        savedPoints: floorPlan.map((p) => toRadar(p, mount)),
+        dirty: draft !== undefined && formatPolygon(draft) !== formatPolygon(floorPlan),
+        check: checkFloorPlan(room),
+      };
+    }
+    const deviceState = this.hass!.states[target.key]?.state ?? "unavailable";
     const devicePoints = parsePolygon(deviceState);
-    const draft = this._drafts[zone.polygon];
     const points = draft ?? devicePoints ?? [];
     return {
       points,
-      devicePoints,
+      roomPoints: points.map((p) => toRoom(p, mount)),
+      savedPoints: devicePoints,
       deviceState,
       dirty: draft !== undefined && formatPolygon(draft) !== deviceState,
       check: checkPolygon(points, (p) => insidePolygon(p, DETECTION_AREA)),
     };
   }
 
-  private _renderEditor(zone: Zone, editing: ReturnType<Ld2450ZoneCard["_editing"]>, offline: boolean) {
+  private _renderEditor(target: Target, mount: Mount, editing: Editing, offline: boolean) {
     const { points, check } = editing;
-    const deviceValue = formatPolygon(points);
-    const full = points.length >= POLYGON_MAX_POINTS;
-    const saving = this._saving?.zone === zone.polygon;
-    const result = this._saveResult?.zone === zone.polygon ? this._saveResult : undefined;
+    const isZone = target.kind === "zone";
+    const maxPoints = isZone ? POLYGON_MAX_POINTS : FLOOR_PLAN_MAX_POINTS;
+    const full = points.length >= maxPoints;
+    const saving = this._saving?.zone === target.key;
+    const result = this._saveResult?.zone === target.key ? this._saveResult : undefined;
     const canSave =
       editing.dirty &&
       check.errors.length === 0 &&
       this._text?.error === undefined &&
-      editing.devicePoints !== undefined &&
-      this._saving === undefined;
-    // The offline notice covers a zone that is unavailable along with the rest of the device
-    const cantSave =
-      editing.devicePoints !== undefined || offline
-        ? undefined
-        : editing.deviceState === "unavailable"
+      editing.savedPoints !== undefined &&
+      this._saving === undefined &&
+      (isZone || (this._isAdmin && this._systemSettings !== undefined));
+    let cantSave: string | undefined;
+    if (!isZone) {
+      if (!this._isAdmin) cantSave = "Only administrators can save the floor plan.";
+    } else if (editing.savedPoints === undefined && !offline) {
+      // The offline notice covers a zone that is unavailable along with the rest of the device
+      cantSave =
+        editing.deviceState === "unavailable"
           ? "This zone is unavailable, so changes can't be saved now."
           : "The device hasn't reported this zone yet, so changes can't be saved now.";
+    }
     return html`
       <div class="editor">
         <p class="help">
           ${
             full
-              ? html`This zone has the most points it can have (${POLYGON_MAX_POINTS}).`
+              ? html`This ${isZone ? "zone" : "floor plan"} has the most points it can have (${maxPoints}).`
               : html`Click the map to add a point, or click an edge to add one there.`
           }
           Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
         <div class="edit-toolbar">
-          <label class="check">
-            <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
-            Snap to grid
-          </label>
-          <span class="spacer"></span>
           <button
             ?disabled=${this._selectedVertex === undefined || this._selectedVertex >= points.length}
-            @click=${() => this._deletePoint(zone, points)}
+            @click=${() => this._deletePoint(target, mount, points)}
           >
             Delete point
           </button>
-          <button ?disabled=${points.length === 0} @click=${() => this._setDraft(zone, [])}>Clear</button>
-          <button ?disabled=${!editing.dirty || saving} @click=${() => this._revert(zone)}>Revert</button>
-          <button class="save" ?disabled=${!canSave} @click=${() => this._save(zone, deviceValue)}>
+          <button ?disabled=${points.length === 0} @click=${() => this._setDraft(target, mount, [])}>Clear</button>
+          <button ?disabled=${!editing.dirty || saving} @click=${() => this._revert(target)}>Revert</button>
+          <span class="spacer"></span>
+          <button class="save" ?disabled=${!canSave} @click=${() => this._save(target, editing)}>
             ${saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -384,7 +454,7 @@ export class Ld2450ZoneCard extends LitElement {
         }
         ${cantSave === undefined ? nothing : html`<p class="error">${cantSave}</p>`}
         <div class="status">
-          <span>${points.length} / ${POLYGON_MAX_POINTS} points</span>
+          <span>${isZone ? `${points.length} / ${maxPoints} points` : `${points.length} points`}</span>
           ${editing.dirty ? html`<span class="dirty">Unsaved changes</span>` : nothing}
         </div>
         ${
@@ -406,13 +476,8 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
-  private _renderPointsText(zone: Zone, mount: Mount, editing: ReturnType<Ld2450ZoneCard["_editing"]>) {
-    const text =
-      this._text?.value ??
-      formatRoomText(
-        editing.points.map((p) => toRoom(p, mount)),
-        this._units,
-      );
+  private _renderPointsText(target: Target, mount: Mount, editing: Editing) {
+    const text = this._text?.value ?? formatRoomText(editing.roomPoints, this._units);
     const deviceValue = formatPolygon(editing.points);
     return html`
       <section>
@@ -423,20 +488,32 @@ export class Ld2450ZoneCard extends LitElement {
             rows="3"
             spellcheck="false"
             .value=${text}
-            @input=${(ev: Event) => this._textInput(zone, mount, (ev.target as HTMLTextAreaElement).value)}
+            @input=${(ev: Event) => this._textInput(target, mount, (ev.target as HTMLTextAreaElement).value)}
             @change=${this._textChange}
           ></textarea>
         </label>
-        <div class="device-value">
-          <span>To write to the device (radar mm):</span>
-          <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
-        </div>
+        ${
+          target.kind === "zone"
+            ? html`<div class="device-value">
+                <span>To write to the device (radar mm):</span>
+                <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
+              </div>`
+            : nothing
+        }
       </section>
     `;
   }
 
+  private _save(target: Target, editing: Editing): void {
+    if (target.kind === "zone") {
+      this._saveZone(target.zone, formatPolygon(editing.points));
+    } else {
+      this._saveFloorPlan(target, editing.roomPoints);
+    }
+  }
+
   /** Write the polygon to the device; it's saved once the device publishes the same value back. */
-  private async _save(zone: Zone, value: string): Promise<void> {
+  private async _saveZone(zone: Zone, value: string): Promise<void> {
     this._saving = { zone: zone.polygon, value };
     this._saveResult = undefined;
     try {
@@ -475,17 +552,49 @@ export class Ld2450ZoneCard extends LitElement {
     clearTimeout(this._savingTimer);
     this._saving = undefined;
     this._saveResult = { zone: saving.zone, ok: true, message: "Saved to the device." };
-    // Drop the draft, unless it changed while saving
-    const draft = this._drafts[saving.zone];
-    if (draft !== undefined && formatPolygon(draft) === saving.value) {
-      const { [saving.zone]: _, ...rest } = this._drafts;
-      this._drafts = rest;
-      this._text = undefined;
+    this._dropDraftIfSaved(saving.zone, saving.value);
+  }
+
+  private async _saveFloorPlan(target: Extract<Target, { kind: "floorPlan" }>, room: Point[]): Promise<void> {
+    const plan = room.map((p) => ({ x: Math.round(p.x) + 0, y: Math.round(p.y) + 0 }));
+    const value = formatPolygon(plan);
+    const settings = withFloorPlan(this._systemSettings ?? {}, target.device.id, plan);
+    this._saving = { zone: target.key, value };
+    this._saveResult = undefined;
+    try {
+      await saveSystemSettings(this.hass!, settings);
+    } catch (err) {
+      this._saving = undefined;
+      this._saveResult = {
+        zone: target.key,
+        ok: false,
+        message: `Not saved: ${(err as Error)?.message ?? err}. Your changes are kept.`,
+      };
+      return;
     }
+    this._saving = undefined;
+    this._systemSettings = settings;
+    this._saveResult = { zone: target.key, ok: true, message: "Floor plan saved." };
+    this._dropDraftIfSaved(target.key, value);
+  }
+
+  /** Drop the draft once saved, unless it changed while saving. */
+  private _dropDraftIfSaved(key: string, value: string): void {
+    const draft = this._drafts[key];
+    if (draft === undefined || formatPolygon(draft) !== value) return;
+    const { [key]: _, ...rest } = this._drafts;
+    this._drafts = rest;
+    this._text = undefined;
   }
 
   private get _snapStep(): number {
     return this._userSettings?.snapStep?.[this._units] ?? DEFAULT_SNAP[this._units];
+  }
+
+  private _saveUserSettings(): void {
+    saveUserSettings(this.hass!, this._userSettings!).catch((err) =>
+      console.warn("ld2450-zone-card: could not save user settings", err),
+    );
   }
 
   private _snapStepInput(ev: Event): void {
@@ -500,48 +609,51 @@ export class Ld2450ZoneCard extends LitElement {
       snapStep: { ...this._userSettings?.snapStep, [this._units]: step },
     };
     clearTimeout(this._snapSaveTimer);
-    this._snapSaveTimer = setTimeout(
-      () =>
-        saveUserSettings(this.hass!, this._userSettings!).catch((err) =>
-          console.warn("ld2450-zone-card: could not save user settings", err),
-        ),
-      SAVE_DELAY_MS,
-    );
+    this._snapSaveTimer = setTimeout(() => this._saveUserSettings(), SAVE_DELAY_MS);
   }
 
-  private _setDraft(zone: Zone, points: Point[]): void {
-    this._drafts = { ...this._drafts, [zone.polygon]: points };
+  private _toggleOverlay(overlay: Overlay, shown: boolean): void {
+    this._userSettings = { ...this._userSettings, overlays: { ...this._userSettings?.overlays, [overlay]: shown } };
+    this._saveUserSettings();
+  }
+
+  /** Set the draft from points in radar coordinates. */
+  private _setDraft(target: Target, mount: Mount, points: Point[]): void {
+    const draft = target.kind === "floorPlan" ? points.map((p) => toRoom(p, mount)) : points;
+    this._drafts = { ...this._drafts, [target.key]: draft };
     this._text = undefined;
     this._saveResult = undefined;
     if (this._selectedVertex !== undefined && this._selectedVertex >= points.length) this._selectedVertex = undefined;
   }
 
-  private _deletePoint(zone: Zone, points: Point[]): void {
+  private _deletePoint(target: Target, mount: Mount, points: Point[]): void {
     const index = this._selectedVertex;
     if (index === undefined) return;
     this._setDraft(
-      zone,
+      target,
+      mount,
       points.filter((_, i) => i !== index),
     );
     this._selectedVertex = undefined;
   }
 
-  private _revert(zone: Zone): void {
-    const { [zone.polygon]: _, ...rest } = this._drafts;
+  private _revert(target: Target): void {
+    const { [target.key]: _, ...rest } = this._drafts;
     this._drafts = rest;
     this._text = undefined;
     this._selectedVertex = undefined;
     this._saveResult = undefined;
   }
 
-  private _textInput(zone: Zone, mount: Mount, value: string): void {
+  private _textInput(target: Target, mount: Mount, value: string): void {
     const parsed = parseRoomText(value, this._units);
     if (typeof parsed === "string") {
       // Keep what was typed, and the last polygon that could be read
       this._text = { value, error: parsed };
       return;
     }
-    this._drafts = { ...this._drafts, [zone.polygon]: parsed.map((p) => toRadar(p, mount)) };
+    const draft = target.kind === "floorPlan" ? parsed : parsed.map((p) => toRadar(p, mount));
+    this._drafts = { ...this._drafts, [target.key]: draft };
     this._text = { value };
     this._saveResult = undefined;
     this._selectedVertex = undefined;
@@ -558,9 +670,7 @@ export class Ld2450ZoneCard extends LitElement {
 
   private _snapChanged(ev: Event): void {
     this._userSettings = { ...this._userSettings, snap: (ev.target as HTMLInputElement).checked };
-    saveUserSettings(this.hass!, this._userSettings).catch((err) =>
-      console.warn("ld2450-zone-card: could not save user settings", err),
-    );
+    this._saveUserSettings();
   }
 
   private _renderZone(zone: Zone) {

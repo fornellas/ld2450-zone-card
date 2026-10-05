@@ -3,6 +3,7 @@ import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
 import { distance, insertionIndex, snap } from "./geometry";
 import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
+import type { Overlay } from "./user-settings";
 
 /** A polygon zone to draw, in radar coordinates. */
 export interface MapZone {
@@ -68,6 +69,9 @@ export class Ld2450ZoneMap extends LitElement {
     targets: { attribute: false },
     zones: { attribute: false },
     offline: { type: Boolean },
+    floorPlan: { attribute: false },
+    editingFloorPlan: { type: Boolean },
+    overlays: { attribute: false },
     editable: { type: Boolean },
     draft: { attribute: false },
     deviceOutline: { attribute: false },
@@ -82,6 +86,12 @@ export class Ld2450ZoneMap extends LitElement {
   zones: MapZone[] = [];
   /** The radar is offline, so there are no targets to show. */
   offline = false;
+  /** The saved floor plan, in room coordinates. */
+  floorPlan: Point[] = [];
+  /** The floor plan is the polygon being edited, so the editor draws it instead. */
+  editingFloorPlan = false;
+  /** Which helper outlines to show; missing ones are shown. */
+  overlays: Partial<Record<Overlay, boolean>> = {};
   editable = false;
   /** The selected zone's points being edited, in radar coordinates. */
   draft: Point[] = [];
@@ -106,7 +116,7 @@ export class Ld2450ZoneMap extends LitElement {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
     const bounds = FIRMWARE_BOUNDS.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
-    const content = extentOf([...area, ...bounds, { x: 0, y: 0 }]);
+    const content = extentOf([...area, ...bounds, { x: 0, y: 0 }, ...this.floorPlan]);
     const size = Math.max(content.maxX - content.minX, content.maxY - content.minY);
     const font = size * 0.025;
     this._handle = size * 0.018;
@@ -133,14 +143,20 @@ export class Ld2450ZoneMap extends LitElement {
         @keydown=${this._keydown}
       >
         ${this._renderGrid(view, font)}
-        <polygon class="bounds" points=${pointsAttr(bounds)}></polygon>
-        <polygon class="area" points=${pointsAttr(area)}></polygon>
+        ${
+          this._shown("floorPlan") && !this.editingFloorPlan && this.floorPlan.length >= 3
+            ? svg`<polygon class="floor-plan" points=${pointsAttr(this.floorPlan)}></polygon>`
+            : nothing
+        }
+        ${this._shown("pointLimits") ? svg`<polygon class="bounds" points=${pointsAttr(bounds)}></polygon>` : nothing}
+        ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
         ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTargets(font)}
         ${this.editable ? this._renderEditor(font) : nothing}
       </svg>
       <div class="legend">
-        <span><i class="swatch area"></i>Tracking range</span>
-        <span><i class="swatch bounds"></i>Zone point limits</span>
+        ${this._renderToggle("trackingRange", "area", "Tracking range")}
+        ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
+        ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
         <span><i class="swatch zone"></i>Selected zone</span>
         <span><i class="swatch occupied"></i>Occupied</span>
         <span><i class="swatch target"></i>Targets</span>
@@ -158,6 +174,25 @@ export class Ld2450ZoneMap extends LitElement {
               })
         }
       </div>
+    `;
+  }
+
+  private _shown(overlay: Overlay): boolean {
+    return this.overlays[overlay] ?? true;
+  }
+
+  /** A legend entry that shows or hides an outline. Fires "overlay-toggled" with { overlay, shown }. */
+  private _renderToggle(overlay: Overlay, swatch: string, label: string) {
+    return html`
+      <label class="toggle">
+        <input
+          type="checkbox"
+          .checked=${this._shown(overlay)}
+          @change=${(ev: Event) =>
+            this._emit("overlay-toggled", { overlay, shown: (ev.target as HTMLInputElement).checked })}
+        />
+        <i class=${`swatch ${swatch}`}></i>${label}
+      </label>
     `;
   }
 
@@ -239,7 +274,12 @@ export class Ld2450ZoneMap extends LitElement {
     const outline = this.deviceOutline?.map((p) => toRoom(p, this.mount));
     // Occupancy comes from the device's polygon: show it there, and not on changes the device doesn't have yet
     const occupied = selected?.occupied ? "occupied" : "";
-    const classes = ["zone", "selected", "editing", outline === undefined ? occupied : ""].join(" ");
+    const classes = [
+      "zone",
+      "selected",
+      "editing",
+      this.editingFloorPlan ? "floor" : outline === undefined ? occupied : "",
+    ].join(" ");
     return svg`
       ${
         outline !== undefined && outline.length > 0
@@ -488,7 +528,8 @@ export class Ld2450ZoneMap extends LitElement {
       stroke-width: 2.5;
       stroke-dasharray: none;
     }
-    .zone.selected polyline {
+    .zone.selected polyline,
+    .zone.selected.floor polygon {
       fill: none;
     }
     .zone.selected.occupied polygon {
@@ -579,6 +620,24 @@ export class Ld2450ZoneMap extends LitElement {
     .swatch.area {
       background: color-mix(in srgb, var(--primary-color) 7%, transparent);
       border: 1.5px solid color-mix(in srgb, var(--primary-color) 45%, transparent);
+    }
+    .floor-plan {
+      fill: none;
+      stroke: var(--primary-text-color);
+      stroke-width: 2.5;
+      stroke-linejoin: round;
+    }
+    .legend label.toggle {
+      display: inline-flex;
+      align-items: center;
+      cursor: pointer;
+    }
+    .legend label.toggle input {
+      margin: 0 4px 0 0;
+    }
+    .swatch.floor-plan {
+      height: 0;
+      border-top: 2.5px solid var(--primary-text-color);
     }
     .swatch.target {
       width: 10px;

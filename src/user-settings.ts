@@ -5,10 +5,14 @@ import type { Units } from "./units";
 
 const KEY = "ld2450_zone_card";
 
+export type Overlay = "trackingRange" | "pointLimits" | "floorPlan";
+
 export interface UserSettings {
   units?: Units;
   /** Snap edited points to the grid. */
   snap?: boolean;
+  /** Which helper outlines the map shows. All are shown until turned off. */
+  overlays?: Partial<Record<Overlay, boolean>>;
   /** Snap step for each unit system, in mm. */
   snapStep?: Partial<Record<Units, number>>;
 }
