@@ -5,6 +5,14 @@ import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
 import type { Overlay } from "./user-settings";
 
+/** An edit from the map. */
+export interface DraftChange {
+  /** The new points, in radar coordinates. */
+  points: Point[];
+  /** Set on every change of one drag, so they can be undone as one. */
+  gesture?: string;
+}
+
 /** A polygon zone to draw, in radar coordinates. */
 export interface MapZone {
   name: string;
@@ -68,8 +76,8 @@ function steps(min: number, max: number, step: number): number[] {
 /**
  * Top-down map of the room in room coordinates (mm), with the radar and where it can see.
  *
- * When editable, the selected zone is drawn from `draft` with handles to edit it. Edits fire "draft-changed" with the
- * new points in radar coordinates, and "vertex-selected" with the index of the selected point (or undefined).
+ * When editable, the selected zone is drawn from `draft` with handles to edit it. Edits fire "draft-changed" with a
+ * DraftChange, and "vertex-selected" with the index of the selected point (or undefined).
  */
 export class Ld2450ZoneMap extends LitElement {
   static override properties = {
@@ -119,7 +127,8 @@ export class Ld2450ZoneMap extends LitElement {
   /** Rendered width of the map, in screen pixels, to size things in pixels. */
   private _widthPx = 0;
   private _resizeObserver?: ResizeObserver;
-  private _drag?: { index: number; startX: number; startY: number; moved: boolean };
+  private _drag?: { index: number; startX: number; startY: number; moved: boolean; gesture: string };
+  private _drags = 0;
 
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
@@ -403,7 +412,7 @@ export class Ld2450ZoneMap extends LitElement {
     const index = insertionIndex(roomPoints, room, this._hitRadius);
     const draft = [...this.draft];
     draft.splice(index, 0, this._toDraftPoint(room));
-    this._emit("draft-changed", draft);
+    this._emit<DraftChange>("draft-changed", { points: draft });
     this._emit("vertex-selected", index);
   }
 
@@ -415,7 +424,7 @@ export class Ld2450ZoneMap extends LitElement {
     } catch {
       // Synthetic events have no active pointer to capture
     }
-    this._drag = { index, startX: ev.clientX, startY: ev.clientY, moved: false };
+    this._drag = { index, startX: ev.clientX, startY: ev.clientY, moved: false, gesture: `drag-${++this._drags}` };
     this._emit("vertex-selected", index);
   }
 
@@ -433,7 +442,7 @@ export class Ld2450ZoneMap extends LitElement {
     if (room === undefined) return;
     const draft = [...this.draft];
     draft[drag.index] = this._toDraftPoint(room);
-    this._emit("draft-changed", draft);
+    this._emit<DraftChange>("draft-changed", { points: draft, gesture: drag.gesture });
   }
 
   private _vertexUp(ev: PointerEvent): void {
@@ -444,10 +453,7 @@ export class Ld2450ZoneMap extends LitElement {
 
   private _deleteVertex(ev: Event | undefined, index: number): void {
     ev?.stopPropagation();
-    this._emit(
-      "draft-changed",
-      this.draft.filter((_, i) => i !== index),
-    );
+    this._emit<DraftChange>("draft-changed", { points: this.draft.filter((_, i) => i !== index) });
     this._emit("vertex-selected", undefined);
   }
 

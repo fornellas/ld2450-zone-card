@@ -39,6 +39,7 @@ import {
 import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
+import type { DraftChange } from "./zone-map";
 
 // Settings are saved once edits settle for this long
 const SAVE_DELAY_MS = 500;
@@ -48,6 +49,17 @@ const FLOOR_PLAN = "floor-plan";
 
 /** What can be edited: a zone (saved to the device) or the device's floor plan (saved in HA). */
 type Target = { kind: "zone"; key: string; zone: Zone } | { kind: "floorPlan"; key: string; device: Ld2450Device };
+
+// Most undo steps kept for each polygon
+const MAX_UNDO = 100;
+
+/** Drafts before (undo) and after (redo) each change; undefined is "no draft", i.e. what's saved. */
+interface History {
+  undo: (Point[] | undefined)[];
+  redo: (Point[] | undefined)[];
+  /** The gesture of the last change (a drag, or typing), whose further changes are undone together. */
+  gesture?: string;
+}
 
 /** The polygon being edited. */
 interface Editing {
@@ -100,6 +112,7 @@ export class Ld2450ZoneCard extends LitElement {
     _drafts: { state: true },
     _selectedVertex: { state: true },
     _text: { state: true },
+    _history: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -128,6 +141,10 @@ export class Ld2450ZoneCard extends LitElement {
   private _selectedVertex?: number;
   /** The polygon text while the user is typing it, with why it can't be read, if so. */
   private _text?: { value: string; error?: string };
+  /** Undo and redo, by target key. */
+  private _history: Record<string, History> = {};
+  /** What's being edited, for keyboard shortcuts. */
+  private _currentTarget?: Target;
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -175,12 +192,14 @@ export class Ld2450ZoneCard extends LitElement {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    this.addEventListener("keydown", this._keydown);
     // Subscribes again in willUpdate after being moved around the dashboard
     this.requestUpdate();
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
+    this.removeEventListener("keydown", this._keydown);
     this._unsubscribeSystem?.then((unsubscribe) => unsubscribe()).catch(() => undefined);
     this._unsubscribeSystem = undefined;
     clearTimeout(this._savingTimer);
@@ -245,6 +264,7 @@ export class Ld2450ZoneCard extends LitElement {
     const mount = deviceMount(this._systemSettings, device.id);
     const floorPlan = deviceFloorPlan(this._systemSettings, device.id);
     const target = this._target(device);
+    this._currentTarget = target;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
     return html`
@@ -306,7 +326,8 @@ export class Ld2450ZoneCard extends LitElement {
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
         .snapStep=${this._snap ? this._snapStep : 0}
-        @draft-changed=${(ev: CustomEvent<Point[]>) => target && this._setDraft(target, ev.detail)}
+        @draft-changed=${(ev: CustomEvent<DraftChange>) =>
+          target && this._setDraft(target, ev.detail.points, ev.detail.gesture)}
         @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
@@ -430,6 +451,20 @@ export class Ld2450ZoneCard extends LitElement {
           Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
         <div class="edit-toolbar">
+          <button
+            title="Undo (Ctrl+Z)"
+            ?disabled=${!this._history[target.key]?.undo.length}
+            @click=${() => this._undo(target)}
+          >
+            Undo
+          </button>
+          <button
+            title="Redo (Ctrl+Shift+Z)"
+            ?disabled=${!this._history[target.key]?.redo.length}
+            @click=${() => this._redo(target)}
+          >
+            Redo
+          </button>
           <button
             ?disabled=${this._selectedVertex === undefined || this._selectedVertex >= points.length}
             @click=${() => this._deletePoint(target, points)}
@@ -613,8 +648,70 @@ export class Ld2450ZoneCard extends LitElement {
     this._saveUserSettings();
   }
 
+  /** Remember the draft before a change, for undo. Further changes of the same gesture are undone with it. */
+  private _remember(key: string, gesture?: string): void {
+    const history = this._history[key] ?? { undo: [], redo: [] };
+    if (gesture !== undefined && history.gesture === gesture) return;
+    this._history = {
+      ...this._history,
+      [key]: { undo: [...history.undo, this._drafts[key]].slice(-MAX_UNDO), redo: [], gesture },
+    };
+  }
+
+  /** Set the draft, or drop it to go back to what's saved. */
+  private _putDraft(key: string, draft: Point[] | undefined): void {
+    if (draft === undefined) {
+      const { [key]: _, ...rest } = this._drafts;
+      this._drafts = rest;
+    } else {
+      this._drafts = { ...this._drafts, [key]: draft };
+    }
+    this._text = undefined;
+    this._selectedVertex = undefined;
+    this._saveResult = undefined;
+  }
+
+  private _undo(target: Target): void {
+    const history = this._history[target.key];
+    if (!history?.undo.length) return;
+    const previous = history.undo[history.undo.length - 1];
+    this._history = {
+      ...this._history,
+      [target.key]: { undo: history.undo.slice(0, -1), redo: [...history.redo, this._drafts[target.key]] },
+    };
+    this._putDraft(target.key, previous);
+  }
+
+  private _redo(target: Target): void {
+    const history = this._history[target.key];
+    if (!history?.redo.length) return;
+    const next = history.redo[history.redo.length - 1];
+    this._history = {
+      ...this._history,
+      [target.key]: { undo: [...history.undo, this._drafts[target.key]], redo: history.redo.slice(0, -1) },
+    };
+    this._putDraft(target.key, next);
+  }
+
+  /** Ctrl+Z undoes, Ctrl+Shift+Z or Ctrl+Y redoes (⌘ on Macs). Text fields keep their own undo. */
+  private _keydown = (ev: KeyboardEvent): void => {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || this._currentTarget === undefined) return;
+    const origin = ev.composedPath()[0] as HTMLElement | undefined;
+    if (origin !== undefined && ["INPUT", "TEXTAREA", "SELECT"].includes(origin.tagName)) return;
+    const key = ev.key.toLowerCase();
+    if (key === "z" && !ev.shiftKey) {
+      this._undo(this._currentTarget);
+    } else if ((key === "z" && ev.shiftKey) || key === "y") {
+      this._redo(this._currentTarget);
+    } else {
+      return;
+    }
+    ev.preventDefault();
+  };
+
   /** Set the draft from points in radar coordinates. */
-  private _setDraft(target: Target, points: Point[]): void {
+  private _setDraft(target: Target, points: Point[], gesture?: string): void {
+    this._remember(target.key, gesture);
     this._drafts = { ...this._drafts, [target.key]: points };
     this._text = undefined;
     this._saveResult = undefined;
@@ -632,11 +729,8 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   private _revert(target: Target): void {
-    const { [target.key]: _, ...rest } = this._drafts;
-    this._drafts = rest;
-    this._text = undefined;
-    this._selectedVertex = undefined;
-    this._saveResult = undefined;
+    this._remember(target.key);
+    this._putDraft(target.key, undefined);
   }
 
   private _textInput(target: Target, mount: Mount, value: string): void {
@@ -646,6 +740,8 @@ export class Ld2450ZoneCard extends LitElement {
       this._text = { value, error: parsed };
       return;
     }
+    // Typing until the text loses focus is undone in one step
+    this._remember(target.key, "typing");
     this._drafts = { ...this._drafts, [target.key]: parsed.map((p) => toRadar(p, mount)) };
     this._text = { value };
     this._saveResult = undefined;
@@ -655,6 +751,9 @@ export class Ld2450ZoneCard extends LitElement {
   /** Leaving the text: show the polygon in use, unless the text can't be read and still needs fixing. */
   private _textChange(): void {
     if (this._text?.error === undefined) this._text = undefined;
+    for (const [key, history] of Object.entries(this._history)) {
+      if (history.gesture === "typing") this._history = { ...this._history, [key]: { ...history, gesture: undefined } };
+    }
   }
 
   private get _snap(): boolean {

@@ -227,9 +227,90 @@ describe("ld2450-zone-card", () => {
         { x: 500.4, y: 0 },
         { x: 500, y: 500 },
       ];
-      root.querySelector("ld2450-zone-map")!.dispatchEvent(new CustomEvent("draft-changed", { detail: draft }));
+      root
+        .querySelector("ld2450-zone-map")!
+        .dispatchEvent(new CustomEvent("draft-changed", { detail: { points: draft } }));
       await update();
       expect(deviceValue()).toBe("0,0;500,0;500,500");
+    });
+
+    describe("undo", () => {
+      const square = (size: number) => [
+        { x: 0, y: 0 },
+        { x: size, y: 0 },
+        { x: size, y: size },
+      ];
+
+      async function undoable() {
+        const env = await edit();
+        const map = env.root.querySelector("ld2450-zone-map")!;
+        const change = async (points: { x: number; y: number }[], gesture?: string) => {
+          map.dispatchEvent(new CustomEvent("draft-changed", { detail: { points, gesture } }));
+          await env.update();
+        };
+        const key = async (key: string, shiftKey = false, from: Element = map) => {
+          from.dispatchEvent(
+            new KeyboardEvent("keydown", { key, ctrlKey: true, shiftKey, bubbles: true, composed: true }),
+          );
+          await env.update();
+        };
+        return { ...env, change, key };
+      }
+
+      it("undoes and redoes with the buttons", async () => {
+        const { change, button, deviceValue, update } = await undoable();
+        expect(button("Undo").disabled).toBe(true);
+        await change(square(500));
+        await change(square(700));
+        button("Undo").click();
+        await update();
+        expect(deviceValue()).toBe("0,0;500,0;500,500");
+        button("Undo").click();
+        await update();
+        expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+        expect(button("Undo").disabled).toBe(true);
+        button("Redo").click();
+        await update();
+        expect(deviceValue()).toBe("0,0;500,0;500,500");
+      });
+
+      it("undoes a drag in one step", async () => {
+        const { change, button, deviceValue, update } = await undoable();
+        await change(square(500), "drag-1");
+        await change(square(600), "drag-1");
+        await change(square(700), "drag-1");
+        button("Undo").click();
+        await update();
+        expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+      });
+
+      it("undoes with Ctrl+Z and redoes with Ctrl+Shift+Z", async () => {
+        const { change, key, deviceValue } = await undoable();
+        await change(square(500));
+        await key("z");
+        expect(deviceValue()).toBe("0,0;1000,0;1000,600");
+        await key("Z", true);
+        expect(deviceValue()).toBe("0,0;500,0;500,500");
+      });
+
+      it("leaves Ctrl+Z in the points text to the text", async () => {
+        const { change, key, deviceValue, textarea } = await undoable();
+        await change(square(500));
+        await key("z", false, textarea());
+        expect(deviceValue()).toBe("0,0;500,0;500,500");
+      });
+
+      it("undoes Revert, and a new change clears redo", async () => {
+        const { change, button, deviceValue, update } = await undoable();
+        await change(square(500));
+        button("Revert").click();
+        await update();
+        button("Undo").click();
+        await update();
+        expect(deviceValue()).toBe("0,0;500,0;500,500");
+        await change(square(800));
+        expect(button("Redo").disabled).toBe(true);
+      });
     });
 
     describe("saving", () => {
