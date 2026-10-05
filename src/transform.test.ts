@@ -7,17 +7,18 @@ const close = (a: { x: number; y: number }, b: { x: number; y: number }) => {
 };
 
 describe("transform", () => {
-  it("is the identity by default", () => {
-    close(toRoom({ x: -782, y: 1713 }, DEFAULT_MOUNT), { x: -782, y: 1713 });
+  it("mirrors x by default, since the radar's x grows towards its left", () => {
+    close(toRoom({ x: -782, y: 1713 }, DEFAULT_MOUNT), { x: 782, y: 1713 });
   });
 
-  it("mirrors x when inverted", () => {
-    close(toRoom({ x: 100, y: 200 }, { ...DEFAULT_MOUNT, invertX: true }), { x: -100, y: 200 });
+  it("keeps the radar's x when inverted", () => {
+    close(toRoom({ x: 100, y: 200 }, { ...DEFAULT_MOUNT, invertX: true }), { x: 100, y: 200 });
   });
 
   it("rotates counter-clockwise", () => {
-    close(toRoom({ x: 0, y: 1000 }, { ...DEFAULT_MOUNT, rotation: 90 }), { x: -1000, y: 0 });
-    close(toRoom({ x: 1000, y: 0 }, { ...DEFAULT_MOUNT, rotation: 90 }), { x: 0, y: 1000 });
+    const asIs = { ...DEFAULT_MOUNT, invertX: true, rotation: 90 };
+    close(toRoom({ x: 0, y: 1000 }, asIs), { x: -1000, y: 0 });
+    close(toRoom({ x: 1000, y: 0 }, asIs), { x: 0, y: 1000 });
   });
 
   it("offsets the radar position", () => {
