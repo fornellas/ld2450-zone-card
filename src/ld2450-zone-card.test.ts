@@ -304,6 +304,43 @@ describe("ld2450-zone-card", () => {
     });
   });
 
+  it("shows when the device is offline", async () => {
+    const h = hass();
+    for (const id of ["text.couch", "text.desk", "sensor.t1_x", "sensor.t1_y"]) {
+      h.states[id] = { ...h.states[id], state: "unavailable" };
+    }
+    const root = await renderCard({}, h);
+    expect(root.querySelector("select")!.options[0].textContent).toBe("Office (offline)");
+    expect(root.querySelector(".offline")!.textContent).toContain("Office is offline");
+    const map = root.querySelector("ld2450-zone-map")!;
+    await (map as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("Radar offline");
+    // Edits are possible, but can't be saved
+    const textarea = root.querySelector("textarea")!;
+    textarea.value = "0,0;1000,0;1000,600";
+    textarea.dispatchEvent(new Event("input"));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    const save = [...root.querySelectorAll(".edit-toolbar button")].find((b) => b.textContent!.includes("Save"));
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("sets the snap step per user", async () => {
+    const root = await renderCard({}, hass());
+    const map = root.querySelector("ld2450-zone-map") as unknown as { snapStep: number };
+    expect(map.snapStep).toBe(100);
+    const input = root.querySelector(".snap-step input") as HTMLInputElement;
+    input.value = "0.05";
+    input.dispatchEvent(new Event("input"));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    expect(map.snapStep).toBe(50);
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    expect(calls).toContainEqual({
+      type: "frontend/set_user_data",
+      key: "ld2450_zone_card",
+      value: { snapStep: { metric: 50 } },
+    });
+  });
+
   it("rejects invalid config", () => {
     const card = document.createElement("ld2450-zone-card") as Ld2450ZoneCard;
     const config = { type: "custom:ld2450-zone-card", targets: [{ x: "sensor.x" }] };

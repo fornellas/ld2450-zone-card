@@ -13,7 +13,7 @@ export interface MapZone {
   occupied: boolean;
 }
 import { DEFAULT_MOUNT, type Mount, toRadar, toRoom } from "./transform";
-import { DEFAULT_GRID, type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
+import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
 const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
@@ -61,19 +61,21 @@ export class Ld2450ZoneMap extends LitElement {
     units: { attribute: false },
     targets: { attribute: false },
     zones: { attribute: false },
+    offline: { type: Boolean },
     editable: { type: Boolean },
     draft: { attribute: false },
     deviceOutline: { attribute: false },
     outside: { attribute: false },
     selectedVertex: { attribute: false },
-    grid: { attribute: false },
-    snapToGrid: { type: Boolean },
+    snapStep: { attribute: false },
   };
 
   mount: Mount = DEFAULT_MOUNT;
   units: Units = "metric";
   targets: TargetPosition[] = [];
   zones: MapZone[] = [];
+  /** The radar is offline, so there are no targets to show. */
+  offline = false;
   editable = false;
   /** The selected zone's points being edited, in radar coordinates. */
   draft: Point[] = [];
@@ -82,10 +84,8 @@ export class Ld2450ZoneMap extends LitElement {
   /** Indexes of draft points outside the limits. */
   outside: number[] = [];
   selectedVertex?: number;
-  /** Grid size, in mm. */
-  grid = DEFAULT_GRID.metric;
-  /** Snap edited points to the grid, in room coordinates. */
-  snapToGrid = false;
+  /** Snap edited points to multiples of this, in room mm. 0 doesn't snap. */
+  snapStep = 0;
 
   /** Size of a point handle, in room mm. */
   private _handle = 100;
@@ -136,7 +136,7 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderSelectedVertex()}
         ${
           this.targets.length === 0
-            ? html`<span>No targets tracked</span>`
+            ? html`<span>${this.offline ? "Radar offline" : "No targets tracked"}</span>`
             : this.targets.map((t) => {
                 const p = toRoom(t.point, this.mount);
                 return html`<span>
@@ -149,7 +149,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _renderGrid(view: Extent, font: number) {
-    const { minor, major } = gridSpacing(this.grid, Math.max(view.maxX - view.minX, view.maxY - view.minY), this.units);
+    const { minor, major } = gridSpacing(this.units);
     const isMajor = (v: number) => Math.abs(v / major - Math.round(v / major)) < 1e-6;
     const lineClass = (v: number) => (Math.abs(v) < 1e-6 ? "axis" : isMajor(v) ? "major" : "minor");
     const xs = steps(view.minX, view.maxX, minor);
@@ -287,7 +287,7 @@ export class Ld2450ZoneMap extends LitElement {
 
   /** A point from the user, snapped in room coordinates, as radar coordinates. */
   private _toDraftPoint(room: Point): Point {
-    return toRadar(snap(room, this.snapToGrid ? this.grid : 0), this.mount);
+    return toRadar(snap(room, this.snapStep), this.mount);
   }
 
   private _emit<T>(name: string, detail: T): void {

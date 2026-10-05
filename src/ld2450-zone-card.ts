@@ -16,9 +16,9 @@ import {
 } from "./system-settings";
 import { type Mount, toRadar, toRoom } from "./transform";
 import {
-  DEFAULT_GRID,
-  MAX_GRID,
-  MIN_GRID,
+  DEFAULT_SNAP,
+  MAX_SNAP,
+  MIN_SNAP,
   type Units,
   defaultUnits,
   fromInputValue,
@@ -63,7 +63,7 @@ export class Ld2450ZoneCard extends LitElement {
     _userSettings: { state: true },
     _systemSettings: { state: true },
     _mountError: { state: true },
-    _gridText: { state: true },
+    _snapText: { state: true },
     _saving: { state: true },
     _saveResult: { state: true },
     _drafts: { state: true },
@@ -81,9 +81,9 @@ export class Ld2450ZoneCard extends LitElement {
   private _unsubscribeSystem?: Promise<() => void>;
   private _saveTimer?: ReturnType<typeof setTimeout>;
   private _mountError?: string;
-  /** The grid size while the user is typing it. */
-  private _gridText?: string;
-  private _gridSaveTimer?: ReturnType<typeof setTimeout>;
+  /** The snap step while the user is typing it. */
+  private _snapText?: string;
+  private _snapSaveTimer?: ReturnType<typeof setTimeout>;
   /** The polygon being written to a zone, until the device publishes it back. */
   private _saving?: { zone: string; value: string };
   private _savingTimer?: ReturnType<typeof setTimeout>;
@@ -207,12 +207,16 @@ export class Ld2450ZoneCard extends LitElement {
   private _renderDevice(devices: Ld2450Device[], device: Ld2450Device, zone: Zone | undefined) {
     const mount = deviceMount(this._systemSettings, device.id);
     const editing = zone === undefined ? undefined : this._editing(zone);
+    const offline = this._isOffline(device);
     return html`
       <div class="selectors">
         <label>
           Device
           <select @change=${this._deviceChanged} ?disabled=${devices.length < 2}>
-            ${devices.map((d) => html`<option value=${d.id} ?selected=${d.id === device.id}>${d.name}</option>`)}
+            ${devices.map((d) => {
+              const label = this._isOffline(d) ? `${d.name} (offline)` : d.name;
+              return html`<option value=${d.id} ?selected=${d.id === device.id}>${label}</option>`;
+            })}
           </select>
         </label>
         <label>
@@ -224,19 +228,15 @@ export class Ld2450ZoneCard extends LitElement {
           </select>
         </label>
       </div>
+      ${
+        offline
+          ? html`<p class="error offline">
+              ${device.name} is offline. Its zones and targets will show again once it's back, and changes can be saved
+              then.
+            </p>`
+          : nothing
+      }
       <div class="toolbar">
-        <label class="grid">
-          Grid (${inputUnit(this._units)})
-          <input
-            type="number"
-            min=${toInputValue(MIN_GRID, this._units)}
-            max=${toInputValue(MAX_GRID, this._units)}
-            step=${this._units === "metric" ? 0.05 : 0.25}
-            .value=${this._gridText ?? String(toInputValue(this._grid, this._units))}
-            @input=${this._gridInput}
-            @change=${() => (this._gridText = undefined)}
-          />
-        </label>
         <div class="segmented" role="group" aria-label="Units">
           ${(["metric", "imperial"] as const).map(
             (u) =>
@@ -246,20 +246,11 @@ export class Ld2450ZoneCard extends LitElement {
           )}
         </div>
       </div>
-      <details class="mount">
-        <summary>Radar position</summary>
-        <ld2450-mount-editor
-          .mount=${mount}
-          .units=${this._units}
-          ?disabled=${!this.hass!.user?.is_admin || this._systemSettings === undefined}
-          @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
-        ></ld2450-mount-editor>
-        ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
-      </details>
       <ld2450-zone-map
         .mount=${mount}
         .units=${this._units}
         .targets=${readTargets(this.hass!, device.targets)}
+        ?offline=${offline}
         .zones=${device.zones.map((z) => ({
           name: z.name,
           points: parsePolygon(this.hass!.states[z.polygon]?.state ?? "") ?? [],
@@ -271,12 +262,40 @@ export class Ld2450ZoneCard extends LitElement {
         .deviceOutline=${editing?.dirty ? editing.devicePoints : undefined}
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
-        .grid=${this._grid}
-        ?snapToGrid=${this._snap}
+        .snapStep=${this._snap ? this._snapStep : 0}
         @draft-changed=${(ev: CustomEvent<Point[]>) => zone && this._setDraft(zone, ev.detail)}
         @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
       ></ld2450-zone-map>
-      ${zone === undefined || editing === undefined ? nothing : this._renderEditor(zone, mount, editing)}
+      ${zone === undefined || editing === undefined ? nothing : this._renderEditor(zone, editing, offline)}
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <section>
+          <h3>Radar position</h3>
+          <ld2450-mount-editor
+            .mount=${mount}
+            .units=${this._units}
+            ?disabled=${!this.hass!.user?.is_admin || this._systemSettings === undefined}
+            @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
+          ></ld2450-mount-editor>
+          ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
+        </section>
+        <section>
+          <h3>Snap grid</h3>
+          <label class="snap-step">
+            Step (${inputUnit(this._units)})
+            <input
+              type="number"
+              min=${toInputValue(MIN_SNAP, this._units)}
+              max=${toInputValue(MAX_SNAP, this._units)}
+              step=${this._units === "metric" ? 0.01 : 0.05}
+              .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
+              @input=${this._snapStepInput}
+              @change=${() => (this._snapText = undefined)}
+            />
+          </label>
+        </section>
+        ${zone === undefined || editing === undefined ? nothing : this._renderPointsText(zone, mount, editing)}
+      </details>
       <details>
         <summary>Entities</summary>
         ${zone === undefined ? nothing : this._renderZone(zone)} ${this._renderTargets(device)}
@@ -289,6 +308,11 @@ export class Ld2450ZoneCard extends LitElement {
             </ul>`
       }
     `;
+  }
+
+  /** A device is offline when HA has none of its zones: they're all unavailable. */
+  private _isOffline(device: Ld2450Device): boolean {
+    return device.zones.length > 0 && device.zones.every((z) => this.hass!.states[z.polygon]?.state === "unavailable");
   }
 
   /** The selected zone's polygon being edited: the draft, or what the device has. */
@@ -306,14 +330,8 @@ export class Ld2450ZoneCard extends LitElement {
     };
   }
 
-  private _renderEditor(zone: Zone, mount: Mount, editing: ReturnType<Ld2450ZoneCard["_editing"]>) {
+  private _renderEditor(zone: Zone, editing: ReturnType<Ld2450ZoneCard["_editing"]>, offline: boolean) {
     const { points, check } = editing;
-    const text =
-      this._text?.value ??
-      formatRoomText(
-        points.map((p) => toRoom(p, mount)),
-        this._units,
-      );
     const deviceValue = formatPolygon(points);
     const full = points.length >= POLYGON_MAX_POINTS;
     const saving = this._saving?.zone === zone.polygon;
@@ -324,6 +342,13 @@ export class Ld2450ZoneCard extends LitElement {
       this._text?.error === undefined &&
       editing.devicePoints !== undefined &&
       this._saving === undefined;
+    // The offline notice covers a zone that is unavailable along with the rest of the device
+    const cantSave =
+      editing.devicePoints !== undefined || offline
+        ? undefined
+        : editing.deviceState === "unavailable"
+          ? "This zone is unavailable, so changes can't be saved now."
+          : "The device hasn't reported this zone yet, so changes can't be saved now.";
     return html`
       <div class="editor">
         <p class="help">
@@ -357,25 +382,7 @@ export class Ld2450ZoneCard extends LitElement {
             ? nothing
             : html`<p class=${result.ok ? "saved" : "error"} role="status">${result.message}</p>`
         }
-        ${
-          editing.devicePoints === undefined
-            ? html`<p class="error">The device is ${editing.deviceState}, so changes can't be saved now.</p>`
-            : nothing
-        }
-        <label class="points">
-          Points (x,y in ${textUnit(this._units)}, room coordinates)
-          <textarea
-            rows="3"
-            spellcheck="false"
-            .value=${text}
-            @input=${(ev: Event) => this._textInput(zone, mount, (ev.target as HTMLTextAreaElement).value)}
-            @change=${this._textChange}
-          ></textarea>
-        </label>
-        <div class="device-value">
-          <span>To write to the device (radar mm):</span>
-          <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
-        </div>
+        ${cantSave === undefined ? nothing : html`<p class="error">${cantSave}</p>`}
         <div class="status">
           <span>${points.length} / ${POLYGON_MAX_POINTS} points</span>
           ${editing.dirty ? html`<span class="dirty">Unsaved changes</span>` : nothing}
@@ -396,6 +403,35 @@ export class Ld2450ZoneCard extends LitElement {
               </ul>`
         }
       </div>
+    `;
+  }
+
+  private _renderPointsText(zone: Zone, mount: Mount, editing: ReturnType<Ld2450ZoneCard["_editing"]>) {
+    const text =
+      this._text?.value ??
+      formatRoomText(
+        editing.points.map((p) => toRoom(p, mount)),
+        this._units,
+      );
+    const deviceValue = formatPolygon(editing.points);
+    return html`
+      <section>
+        <h3>Points</h3>
+        <label class="points">
+          x,y in ${textUnit(this._units)}, room coordinates
+          <textarea
+            rows="3"
+            spellcheck="false"
+            .value=${text}
+            @input=${(ev: Event) => this._textInput(zone, mount, (ev.target as HTMLTextAreaElement).value)}
+            @change=${this._textChange}
+          ></textarea>
+        </label>
+        <div class="device-value">
+          <span>To write to the device (radar mm):</span>
+          <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
+        </div>
+      </section>
     `;
   }
 
@@ -448,23 +484,23 @@ export class Ld2450ZoneCard extends LitElement {
     }
   }
 
-  private get _grid(): number {
-    return this._userSettings?.grid?.[this._units] ?? DEFAULT_GRID[this._units];
+  private get _snapStep(): number {
+    return this._userSettings?.snapStep?.[this._units] ?? DEFAULT_SNAP[this._units];
   }
 
-  private _gridInput(ev: Event): void {
+  private _snapStepInput(ev: Event): void {
     const text = (ev.target as HTMLInputElement).value;
     const value = Number(text);
     if (text.trim() === "" || !Number.isFinite(value)) return;
-    const grid = fromInputValue(value, this._units);
-    if (grid < MIN_GRID || grid > MAX_GRID) return;
-    this._gridText = text;
+    const step = fromInputValue(value, this._units);
+    if (step < MIN_SNAP || step > MAX_SNAP) return;
+    this._snapText = text;
     this._userSettings = {
       ...this._userSettings,
-      grid: { ...this._userSettings?.grid, [this._units]: grid },
+      snapStep: { ...this._userSettings?.snapStep, [this._units]: step },
     };
-    clearTimeout(this._gridSaveTimer);
-    this._gridSaveTimer = setTimeout(
+    clearTimeout(this._snapSaveTimer);
+    this._snapSaveTimer = setTimeout(
       () =>
         saveUserSettings(this.hass!, this._userSettings!).catch((err) =>
           console.warn("ld2450-zone-card: could not save user settings", err),
@@ -593,10 +629,21 @@ export class Ld2450ZoneCard extends LitElement {
       gap: 12px;
       margin: 12px 0 8px;
     }
-    label.grid {
-      flex: 0 1 110px;
+    .toolbar {
+      justify-content: flex-end;
     }
-    label.grid input {
+    details.advanced section + section {
+      margin-top: 16px;
+    }
+    details.advanced h3 {
+      margin: 12px 0 8px;
+      font-size: 1em;
+      font-weight: 500;
+    }
+    label.snap-step {
+      max-width: 160px;
+    }
+    label.snap-step input {
       padding: 4px 8px;
       font: inherit;
       color: var(--primary-text-color);
@@ -629,12 +676,6 @@ export class Ld2450ZoneCard extends LitElement {
     }
     details {
       margin-top: 12px;
-    }
-    details.mount {
-      margin: 0 0 12px;
-    }
-    details.mount[open] summary {
-      margin-bottom: 12px;
     }
     .error {
       margin: 8px 0 0;
@@ -720,9 +761,6 @@ export class Ld2450ZoneCard extends LitElement {
       flex: 0 0 auto;
       font-size: 1em;
       color: var(--primary-text-color);
-    }
-    label.points {
-      margin-top: 12px;
     }
     textarea {
       box-sizing: border-box;
