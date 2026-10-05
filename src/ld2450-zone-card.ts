@@ -357,7 +357,7 @@ export class Ld2450ZoneCard extends LitElement {
               ? html`This zone has the most points it can have (${POLYGON_MAX_POINTS}).`
               : html`Click the map to add a point, or click an edge to add one there.`
           }
-          Drag a point to move it; double-click it, or select it and press Delete, to remove it.
+          Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
         <div class="edit-toolbar">
           <label class="check">

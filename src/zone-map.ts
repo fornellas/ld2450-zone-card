@@ -21,6 +21,12 @@ const HEADING_LENGTH = 700;
 const TARGET_RADIUS = 180;
 // Pointer movement, in screen pixels, before pressing a point becomes dragging it
 const DRAG_THRESHOLD_PX = 4;
+// Smallest radius around a point that grabs it, in screen pixels, so fingers can hit it
+const MIN_HIT_RADIUS_PX = 22;
+
+// Touches that start on a point drag it, rather than scroll or zoom the page. touch-action isn't reliable on SVG
+// elements (iOS Safari ignores it), so cancel the touch itself; this needs a listener that isn't passive.
+const preventTouchDefault = { handleEvent: (ev: Event) => ev.preventDefault(), passive: false };
 
 interface Extent {
   minX: number;
@@ -89,6 +95,11 @@ export class Ld2450ZoneMap extends LitElement {
 
   /** Size of a point handle, in room mm. */
   private _handle = 100;
+  /** Radius around a point that grabs it, in room mm. */
+  private _hitRadius = 100;
+  /** Rendered width of the map, in screen pixels, to size things in pixels. */
+  private _widthPx = 0;
+  private _resizeObserver?: ResizeObserver;
   private _drag?: { index: number; startX: number; startY: number; moved: boolean };
 
   override render() {
@@ -107,6 +118,8 @@ export class Ld2450ZoneMap extends LitElement {
       maxY: content.maxY + font,
     };
     const viewBox = `${view.minX} ${-view.maxY} ${view.maxX - view.minX} ${view.maxY - view.minY}`;
+    const mmPerPx = this._widthPx > 0 ? (view.maxX - view.minX) / this._widthPx : 0;
+    this._hitRadius = Math.max(this._handle, MIN_HIT_RADIUS_PX * mmPerPx);
 
     return html`
       <svg
@@ -256,14 +269,40 @@ export class Ld2450ZoneMap extends LitElement {
             @pointercancel=${(ev: PointerEvent) => this._vertexUp(ev)}
             @click=${(ev: Event) => ev.stopPropagation()}
             @dblclick=${(ev: Event) => this._deleteVertex(ev, i)}
+            @touchstart=${preventTouchDefault}
+            @touchmove=${preventTouchDefault}
           >
-            <circle class="hit" cx=${p.x} cy=${-p.y} r=${this._handle}></circle>
+            <circle class="hit" cx=${p.x} cy=${-p.y} r=${this._hitRadius}></circle>
             <circle class="dot" cx=${p.x} cy=${-p.y} r=${this._handle * 0.5}></circle>
             <text x=${p.x + this._handle * 0.8} y=${-p.y - this._handle * 0.8} style="font-size: ${font * 0.8}px">${i + 1}</text>
           </g>
         `;
       })}
     `;
+  }
+
+  override firstUpdated(): void {
+    const svgEl = this.renderRoot.querySelector("svg");
+    if (svgEl === null || typeof ResizeObserver === "undefined") return;
+    this._resizeObserver = new ResizeObserver(() => {
+      if (svgEl.clientWidth !== this._widthPx) {
+        this._widthPx = svgEl.clientWidth;
+        this.requestUpdate();
+      }
+    });
+    this._resizeObserver.observe(svgEl);
+  }
+
+  override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._resizeObserver?.disconnect();
+    this._resizeObserver = undefined;
+  }
+
+  override connectedCallback(): void {
+    super.connectedCallback();
+    // Observe again after being moved around the page
+    if (this.hasUpdated && this._resizeObserver === undefined) this.firstUpdated();
   }
 
   private _renderSelectedVertex() {
@@ -299,7 +338,7 @@ export class Ld2450ZoneMap extends LitElement {
     const room = this._roomPoint(ev);
     if (room === undefined) return;
     const roomPoints = this.draft.map((p) => toRoom(p, this.mount));
-    const index = insertionIndex(roomPoints, room, this._handle);
+    const index = insertionIndex(roomPoints, room, this._hitRadius);
     const draft = [...this.draft];
     draft.splice(index, 0, this._toDraftPoint(room));
     this._emit("draft-changed", draft);
