@@ -37,10 +37,17 @@ describe("system settings", () => {
       { x: 1000, y: 1000 },
     ];
     const settings = withFloorPlan({ mounts: {} }, "dev1", plan);
+    expect(settings.floorPlans).toEqual({ dev1: { points: plan } });
     expect(deviceFloorPlan(settings, "dev1")).toEqual(plan);
     expect(deviceFloorPlan(settings, "dev2")).toEqual([]);
-    expect(deviceFloorPlan({ floorPlans: { dev1: [{ x: "a" }] as never } }, "dev1")).toEqual([]);
+    expect(deviceFloorPlan({ floorPlans: { dev1: { points: [{ x: "a" }] } as never } }, "dev1")).toEqual([]);
     expect(settings.mounts).toEqual({});
+  });
+
+  it("converts v0.0.14 floor plans from room coordinates", () => {
+    const mount = { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } };
+    const settings = { mounts: { dev1: mount }, floorPlans: { dev1: [{ x: 1000, y: 500 }] } };
+    expect(deviceFloorPlan(settings, "dev1")).toEqual([{ x: 0, y: 500 }]);
   });
 
   it("sets a device's mount without touching others", () => {

@@ -374,19 +374,21 @@ describe("ld2450-zone-card", () => {
         key: "ld2450_zone_card",
         value: {
           mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } },
+          // Stored in radar coordinates: room (-3000,-500) -> minus offset (-4000,-500) -> inverted (4000,-500)
           floorPlans: {
-            dev1: [
-              { x: -3000, y: -500 },
-              { x: 3000, y: -500 },
-              { x: 3000, y: 6000 },
-              { x: -3000, y: 6000 },
-            ],
+            dev1: {
+              points: [
+                { x: 4000, y: -500 },
+                { x: -2000, y: -500 },
+                { x: -2000, y: 6000 },
+                { x: 4000, y: 6000 },
+              ],
+            },
           },
         },
       });
       expect(root.querySelector(".saved")!.textContent).toContain("Floor plan saved");
       expect(root.querySelector(".dirty")).toBeNull();
-      // Its room coordinates don't depend on the radar position
       expect(root.querySelector("textarea")!.value).toBe("-3000,-500;3000,-500;3000,6000;-3000,6000");
     });
 

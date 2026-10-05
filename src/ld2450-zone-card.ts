@@ -123,7 +123,7 @@ export class Ld2450ZoneCard extends LitElement {
 
   /** How long the device has to publish a written polygon back before the write counts as rejected. */
   static saveTimeoutMs = 5000;
-  /** Edited polygons not saved yet, by target key: zones in radar coordinates, floor plans in room coordinates. */
+  /** Edited polygons not saved yet, in radar coordinates, by target key. */
   private _drafts: Record<string, Point[]> = {};
   private _selectedVertex?: number;
   /** The polygon text while the user is typing it, with why it can't be read, if so. */
@@ -306,12 +306,12 @@ export class Ld2450ZoneCard extends LitElement {
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
         .snapStep=${this._snap ? this._snapStep : 0}
-        @draft-changed=${(ev: CustomEvent<Point[]>) => target && this._setDraft(target, mount, ev.detail)}
+        @draft-changed=${(ev: CustomEvent<Point[]>) => target && this._setDraft(target, ev.detail)}
         @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
-      ${target === undefined || editing === undefined ? nothing : this._renderEditor(target, mount, editing, offline)}
+      ${target === undefined || editing === undefined ? nothing : this._renderEditor(target, editing, offline)}
       <details class="advanced">
         <summary>Advanced</summary>
         ${target === undefined || editing === undefined ? nothing : this._renderPointsText(target, mount, editing)}
@@ -369,21 +369,17 @@ export class Ld2450ZoneCard extends LitElement {
     return device.zones.length > 0 && device.zones.every((z) => this.hass!.states[z.polygon]?.state === "unavailable");
   }
 
-  /**
-   * The polygon being edited: the draft, or what's saved. Points are in radar coordinates, as the map takes them;
-   * zone drafts are kept in radar coordinates, and floor plan drafts in room coordinates, so each stays put when the
-   * radar position changes.
-   */
+  /** The polygon being edited: the draft, or what's saved, in radar coordinates. */
   private _editing(target: Target, mount: Mount, floorPlan: Point[]): Editing {
     const draft = this._drafts[target.key];
     if (target.kind === "floorPlan") {
-      const room = draft ?? floorPlan;
+      const points = draft ?? floorPlan;
       return {
-        points: room.map((p) => toRadar(p, mount)),
-        roomPoints: room,
-        savedPoints: floorPlan.map((p) => toRadar(p, mount)),
+        points,
+        roomPoints: points.map((p) => toRoom(p, mount)),
+        savedPoints: floorPlan,
         dirty: draft !== undefined && formatPolygon(draft) !== formatPolygon(floorPlan),
-        check: checkFloorPlan(room),
+        check: checkFloorPlan(points),
       };
     }
     const deviceState = this.hass!.states[target.key]?.state ?? "unavailable";
@@ -399,7 +395,7 @@ export class Ld2450ZoneCard extends LitElement {
     };
   }
 
-  private _renderEditor(target: Target, mount: Mount, editing: Editing, offline: boolean) {
+  private _renderEditor(target: Target, editing: Editing, offline: boolean) {
     const { points, check } = editing;
     const isZone = target.kind === "zone";
     const maxPoints = isZone ? POLYGON_MAX_POINTS : FLOOR_PLAN_MAX_POINTS;
@@ -436,11 +432,11 @@ export class Ld2450ZoneCard extends LitElement {
         <div class="edit-toolbar">
           <button
             ?disabled=${this._selectedVertex === undefined || this._selectedVertex >= points.length}
-            @click=${() => this._deletePoint(target, mount, points)}
+            @click=${() => this._deletePoint(target, points)}
           >
             Delete point
           </button>
-          <button ?disabled=${points.length === 0} @click=${() => this._setDraft(target, mount, [])}>Clear</button>
+          <button ?disabled=${points.length === 0} @click=${() => this._setDraft(target, [])}>Clear</button>
           <button ?disabled=${!editing.dirty || saving} @click=${() => this._revert(target)}>Revert</button>
           <span class="spacer"></span>
           <button class="save" ?disabled=${!canSave} @click=${() => this._save(target, editing)}>
@@ -508,7 +504,7 @@ export class Ld2450ZoneCard extends LitElement {
     if (target.kind === "zone") {
       this._saveZone(target.zone, formatPolygon(editing.points));
     } else {
-      this._saveFloorPlan(target, editing.roomPoints);
+      this._saveFloorPlan(target, editing.points);
     }
   }
 
@@ -555,8 +551,8 @@ export class Ld2450ZoneCard extends LitElement {
     this._dropDraftIfSaved(saving.zone, saving.value);
   }
 
-  private async _saveFloorPlan(target: Extract<Target, { kind: "floorPlan" }>, room: Point[]): Promise<void> {
-    const plan = room.map((p) => ({ x: Math.round(p.x) + 0, y: Math.round(p.y) + 0 }));
+  private async _saveFloorPlan(target: Extract<Target, { kind: "floorPlan" }>, points: Point[]): Promise<void> {
+    const plan = points.map((p) => ({ x: Math.round(p.x) + 0, y: Math.round(p.y) + 0 }));
     const value = formatPolygon(plan);
     const settings = withFloorPlan(this._systemSettings ?? {}, target.device.id, plan);
     this._saving = { zone: target.key, value };
@@ -618,20 +614,18 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   /** Set the draft from points in radar coordinates. */
-  private _setDraft(target: Target, mount: Mount, points: Point[]): void {
-    const draft = target.kind === "floorPlan" ? points.map((p) => toRoom(p, mount)) : points;
-    this._drafts = { ...this._drafts, [target.key]: draft };
+  private _setDraft(target: Target, points: Point[]): void {
+    this._drafts = { ...this._drafts, [target.key]: points };
     this._text = undefined;
     this._saveResult = undefined;
     if (this._selectedVertex !== undefined && this._selectedVertex >= points.length) this._selectedVertex = undefined;
   }
 
-  private _deletePoint(target: Target, mount: Mount, points: Point[]): void {
+  private _deletePoint(target: Target, points: Point[]): void {
     const index = this._selectedVertex;
     if (index === undefined) return;
     this._setDraft(
       target,
-      mount,
       points.filter((_, i) => i !== index),
     );
     this._selectedVertex = undefined;
@@ -652,8 +646,7 @@ export class Ld2450ZoneCard extends LitElement {
       this._text = { value, error: parsed };
       return;
     }
-    const draft = target.kind === "floorPlan" ? parsed : parsed.map((p) => toRadar(p, mount));
-    this._drafts = { ...this._drafts, [target.key]: draft };
+    this._drafts = { ...this._drafts, [target.key]: parsed.map((p) => toRadar(p, mount)) };
     this._text = { value };
     this._saveResult = undefined;
     this._selectedVertex = undefined;

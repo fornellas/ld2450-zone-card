@@ -26,3 +26,36 @@ describe("ld2450-zone-map", () => {
     expect(ev.defaultPrevented).toBe(false);
   });
 });
+
+describe("ld2450-zone-map fitting", () => {
+  async function viewBox(setup: (map: Ld2450ZoneMap) => void): Promise<number[]> {
+    const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+    setup(map);
+    document.body.appendChild(map);
+    await map.updateComplete;
+    return map.shadowRoot!.querySelector("svg")!.getAttribute("viewBox")!.split(" ").map(Number);
+  }
+
+  it("fits only what's shown", async () => {
+    const all = await viewBox(() => undefined);
+    const zone = [
+      { x: -500, y: 1000 },
+      { x: 500, y: 1000 },
+      { x: 500, y: 2000 },
+    ];
+    const zoneOnly = await viewBox((map) => {
+      map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+      map.zones = [{ name: "Couch", points: zone, selected: true, occupied: false }];
+    });
+    // The zone and the radar need far less room than the tracking range and limits
+    expect(zoneOnly[2]).toBeLessThan(all[2] / 2);
+  });
+
+  it("fits the tracking range when nothing else is shown", async () => {
+    const all = await viewBox(() => undefined);
+    const nothingShown = await viewBox((map) => {
+      map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+    });
+    expect(nothingShown[3]).toBeGreaterThan(all[3] * 0.9);
+  });
+});

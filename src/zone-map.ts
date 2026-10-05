@@ -20,6 +20,8 @@ const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
 const HEADING_LENGTH = 700;
 const TARGET_RADIUS = 180;
+// Smallest area the map shows, in mm, so a lone small zone doesn't fill it
+const MIN_MAP_SIZE = 2000;
 // Pointer movement, in screen pixels, before pressing a point becomes dragging it
 const DRAG_THRESHOLD_PX = 4;
 // Smallest radius around a point that grabs it, in screen pixels, so fingers can hit it
@@ -43,6 +45,13 @@ function extentOf(points: Point[]): Extent {
     minY: Math.min(...points.map((p) => p.y)),
     maxY: Math.max(...points.map((p) => p.y)),
   };
+}
+
+/** Grow an extent around its center to at least size wide and high. */
+function growTo(e: Extent, size: number): Extent {
+  const growX = Math.max(0, size - (e.maxX - e.minX)) / 2;
+  const growY = Math.max(0, size - (e.maxY - e.minY)) / 2;
+  return { minX: e.minX - growX, maxX: e.maxX + growX, minY: e.minY - growY, maxY: e.maxY + growY };
 }
 
 /** SVG y grows downwards, room y grows away from the viewer. */
@@ -86,7 +95,7 @@ export class Ld2450ZoneMap extends LitElement {
   zones: MapZone[] = [];
   /** The radar is offline, so there are no targets to show. */
   offline = false;
-  /** The saved floor plan, in room coordinates. */
+  /** The saved floor plan, in radar coordinates. */
   floorPlan: Point[] = [];
   /** The floor plan is the polygon being edited, so the editor draws it instead. */
   editingFloorPlan = false;
@@ -116,7 +125,20 @@ export class Ld2450ZoneMap extends LitElement {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
     const bounds = FIRMWARE_BOUNDS.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
-    const content = extentOf([...area, ...bounds, { x: 0, y: 0 }, ...this.floorPlan]);
+    const floorPlan = this.floorPlan.map((p) => toRoom(p, this.mount));
+    // Fit what's shown: the radar, the zones, and the outlines that are on. Not the polygon being edited, so the map
+    // doesn't rescale while dragging its points.
+    const radar = toRoom({ x: 0, y: 0 }, this.mount);
+    const shown = [
+      radar,
+      ...this.zones.flatMap((z) => z.points.map((p) => toRoom(p, this.mount))),
+      ...(this._shown("trackingRange") ? area : []),
+      ...(this._shown("pointLimits") ? bounds : []),
+      ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
+    ];
+    // With nothing else to show, fit the tracking range rather than a single point
+    const fitted = extentOf(shown.length > 1 ? shown : [...shown, ...area]);
+    const content = growTo(fitted, MIN_MAP_SIZE);
     const size = Math.max(content.maxX - content.minX, content.maxY - content.minY);
     const font = size * 0.025;
     this._handle = size * 0.018;
@@ -145,7 +167,7 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderGrid(view, font)}
         ${
           this._shown("floorPlan") && !this.editingFloorPlan && this.floorPlan.length >= 3
-            ? svg`<polygon class="floor-plan" points=${pointsAttr(this.floorPlan)}></polygon>`
+            ? svg`<polygon class="floor-plan" points=${pointsAttr(floorPlan)}></polygon>`
             : nothing
         }
         ${this._shown("pointLimits") ? svg`<polygon class="bounds" points=${pointsAttr(bounds)}></polygon>` : nothing}
