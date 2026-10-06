@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
-import { insidePolygon } from "./geometry";
+import { clipToRect, insidePolygon, perimeter } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
 import {
@@ -10,6 +10,10 @@ import {
   type Point,
   type PolygonCheck,
   checkFloorPlan,
+  POLYGON_MAX_X,
+  POLYGON_MAX_Y,
+  POLYGON_MIN_X,
+  POLYGON_MIN_Y,
   checkPolygon,
   formatPolygon,
   parsePolygon,
@@ -28,7 +32,9 @@ import {
 import { type Mount, toRadar, toRoom } from "./transform";
 import {
   DEFAULT_SNAP,
+  DEFAULT_TRAIL_MARGIN,
   MAX_SNAP,
+  MAX_TRAIL_MARGIN,
   MIN_SNAP,
   type Units,
   defaultUnits,
@@ -36,7 +42,7 @@ import {
   inputUnit,
   toInputValue,
 } from "./units";
-import { type Overlay, type UserSettings, fetchUserSettings, overlayShown, saveUserSettings } from "./user-settings";
+import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
 import type { DraftChange } from "./zone-map";
@@ -115,6 +121,8 @@ export class Ld2450ZoneCard extends LitElement {
     _selectedVertex: { state: true },
     _text: { state: true },
     _history: { state: true },
+    _trailOn: { state: true },
+    _marginText: { state: true },
   };
 
   hass?: HomeAssistant;
@@ -147,6 +155,11 @@ export class Ld2450ZoneCard extends LitElement {
   private _history: Record<string, History> = {};
   /** What's being edited, for keyboard shortcuts. */
   private _currentTarget?: Target;
+  /** Whether the trail is on. Off on every load. */
+  private _trailOn = false;
+  /** The trail margin while the user is typing it. */
+  private _marginText?: string;
+  private _marginSaveTimer?: ReturnType<typeof setTimeout>;
   /** Where targets have been seen while the trail is on, in radar coordinates, by device. Kept in this page only. */
   private _trails: Record<string, Point[]> = {};
   /** The last position recorded for each target, so a target standing still isn't recorded again and again. */
@@ -274,7 +287,7 @@ export class Ld2450ZoneCard extends LitElement {
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
     const targets = readTargets(this.hass!, device.targets);
-    if (overlayShown(this._userSettings?.overlays, "trail")) this._recordTrail(device.id, targets);
+    if (this._trailOn) this._recordTrail(device.id, targets);
     return html`
       <div class="selectors">
         <label>
@@ -319,6 +332,8 @@ export class Ld2450ZoneCard extends LitElement {
         .units=${this._units}
         .targets=${targets}
         .trail=${this._trails[device.id] ?? []}
+        ?trailShown=${this._trailOn}
+        @trail-toggled=${(ev: CustomEvent<{ shown: boolean }>) => this._toggleTrail(ev.detail.shown)}
         @trail-cleared=${() => this._clearTrail(device.id)}
         ?offline=${offline}
         .floorPlan=${floorPlan}
@@ -342,6 +357,7 @@ export class Ld2450ZoneCard extends LitElement {
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
+      ${this._trailOn && target?.kind === "zone" ? this._renderFitToTrail(target, mount, device) : nothing}
       ${target === undefined || editing === undefined ? nothing : this._renderEditor(target, editing, offline)}
       <details class="advanced">
         <summary>Advanced</summary>
@@ -677,9 +693,72 @@ export class Ld2450ZoneCard extends LitElement {
     this.requestUpdate();
   }
 
-  private _toggleOverlay(overlay: Overlay, shown: boolean): void {
+  private _toggleTrail(shown: boolean): void {
+    this._trailOn = shown;
     // The trail starts afresh each time it's turned on
-    if (overlay === "trail" && !shown) this._clearTrail();
+    if (!shown) this._clearTrail();
+  }
+
+  private _renderFitToTrail(target: Target, mount: Mount, device: Ld2450Device) {
+    const trail = this._trails[device.id] ?? [];
+    return html`
+      <div class="fit-trail">
+        <label class="margin">
+          Margin (${inputUnit(this._units)})
+          <input
+            type="number"
+            min="0"
+            max=${toInputValue(MAX_TRAIL_MARGIN, this._units)}
+            step=${this._units === "metric" ? 0.05 : 0.25}
+            .value=${this._marginText ?? String(toInputValue(this._trailMargin, this._units))}
+            @input=${this._marginInput}
+            @change=${() => (this._marginText = undefined)}
+          />
+        </label>
+        <button ?disabled=${trail.length === 0} @click=${() => this._fitToTrail(target, mount, trail)}>
+          Fit zone to trail
+        </button>
+      </div>
+    `;
+  }
+
+  private get _trailMargin(): number {
+    return this._userSettings?.trailMargin?.[this._units] ?? DEFAULT_TRAIL_MARGIN[this._units];
+  }
+
+  private _marginInput(ev: Event): void {
+    const text = (ev.target as HTMLInputElement).value;
+    const value = Number(text);
+    if (text.trim() === "" || !Number.isFinite(value)) return;
+    const margin = fromInputValue(value, this._units);
+    if (margin < 0 || margin > MAX_TRAIL_MARGIN) return;
+    this._marginText = text;
+    this._userSettings = {
+      ...this._userSettings,
+      trailMargin: { ...this._userSettings?.trailMargin, [this._units]: margin },
+    };
+    clearTimeout(this._marginSaveTimer);
+    this._marginSaveTimer = setTimeout(() => this._saveUserSettings(), SAVE_DELAY_MS);
+  }
+
+  /**
+   * Replace the zone with a perimeter around the trail, keeping the margin to every point. It's built in room
+   * coordinates, so its edges line up with the map, then cut to the zone point limits so the device accepts it.
+   */
+  private _fitToTrail(target: Target, mount: Mount, trail: Point[]): void {
+    const room = perimeter(
+      trail.map((p) => toRoom(p, mount)),
+      this._trailMargin,
+    );
+    const points = clipToRect(
+      room.map((p) => toRadar(p, mount)),
+      { x: POLYGON_MIN_X, y: POLYGON_MIN_Y },
+      { x: POLYGON_MAX_X, y: POLYGON_MAX_Y },
+    );
+    this._setDraft(target, points);
+  }
+
+  private _toggleOverlay(overlay: Overlay, shown: boolean): void {
     this._userSettings = { ...this._userSettings, overlays: { ...this._userSettings?.overlays, [overlay]: shown } };
     this._saveUserSettings();
   }
@@ -963,6 +1042,39 @@ export class Ld2450ZoneCard extends LitElement {
     }
     .editor {
       margin-top: 12px;
+    }
+    .fit-trail {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px 12px;
+      margin-top: 12px;
+    }
+    .fit-trail label.margin {
+      flex: 0 1 120px;
+    }
+    .fit-trail input {
+      padding: 4px 8px;
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color);
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      min-width: 0;
+    }
+    .fit-trail button {
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 0.9em;
+      color: var(--primary-color);
+      background: none;
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .fit-trail button:disabled {
+      color: var(--disabled-text-color, #bdbdbd);
+      cursor: default;
     }
     .help {
       margin: 0 0 8px;

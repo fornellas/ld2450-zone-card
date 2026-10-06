@@ -11,6 +11,10 @@ export const DEFAULT_SNAP: Record<Units, number> = { metric: 100, imperial: MM_P
 export const MIN_SNAP = 10;
 export const MAX_SNAP = 5000;
 
+/** Margin around the trail when fitting a zone to it, until the user sets one, in mm: 30 cm or 1 ft. */
+export const DEFAULT_TRAIL_MARGIN: Record<Units, number> = { metric: 300, imperial: MM_PER_FOOT };
+export const MAX_TRAIL_MARGIN = 2000;
+
 export interface GridSpacing {
   /** Distance between grid lines, in mm. */
   minor: number;

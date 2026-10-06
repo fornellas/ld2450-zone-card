@@ -3,7 +3,7 @@ import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
 import { distance, insertionIndex, snap } from "./geometry";
 import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
-import { type Overlay, overlayShown } from "./user-settings";
+import type { Overlay } from "./user-settings";
 
 /** An edit from the map. */
 export interface DraftChange {
@@ -89,6 +89,7 @@ export class Ld2450ZoneMap extends LitElement {
     editingFloorPlan: { type: Boolean },
     overlays: { attribute: false },
     trail: { attribute: false },
+    trailShown: { type: Boolean },
     editable: { type: Boolean },
     draft: { attribute: false },
     deviceOutline: { attribute: false },
@@ -109,8 +110,10 @@ export class Ld2450ZoneMap extends LitElement {
   editingFloorPlan = false;
   /** Which overlays to show; see overlayShown() for the defaults. */
   overlays: Partial<Record<Overlay, boolean>> = {};
-  /** Where targets have been seen, in radar coordinates, drawn when the trail is shown. */
+  /** Where targets have been seen, in radar coordinates. */
   trail: Point[] = [];
+  /** Show the trail. Toggling it fires "trail-toggled" with { shown }. */
+  trailShown = false;
   editable = false;
   /** The selected zone's points being edited, in radar coordinates. */
   draft: Point[] = [];
@@ -191,9 +194,16 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
         ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
         <span class="trail-toggle">
-          ${this._renderToggle("trail", "trail", "Trail")}
+          <label class="toggle">
+            <input
+              type="checkbox"
+              .checked=${this.trailShown}
+              @change=${(ev: Event) => this._emit("trail-toggled", { shown: (ev.target as HTMLInputElement).checked })}
+            />
+            <i class="swatch trail"></i>Trail
+          </label>
           ${
-            this._shown("trail") && this.trail.length > 0
+            this.trailShown && this.trail.length > 0
               ? html`<button class="link" @click=${() => this._emit("trail-cleared", undefined)}>Clear</button>`
               : nothing
           }
@@ -219,7 +229,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _shown(overlay: Overlay): boolean {
-    return overlayShown(this.overlays, overlay);
+    return this.overlays[overlay] ?? true;
   }
 
   /** A legend entry that shows or hides an outline. Fires "overlay-toggled" with { overlay, shown }. */
@@ -269,7 +279,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _renderTrail(font: number) {
-    if (!this._shown("trail")) return nothing;
+    if (!this.trailShown) return nothing;
     const r = this._targetRadius(font);
     return svg`
       <g class="trail">

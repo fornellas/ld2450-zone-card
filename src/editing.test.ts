@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { insertionIndex, insidePolygon, snap } from "./geometry";
+import { clipToRect, distance, distanceToSegment, insertionIndex, insidePolygon, perimeter, snap } from "./geometry";
 import { checkPolygon, formatPolygon } from "./polygon";
 import { formatRoomText, parseRoomText } from "./polygon-text";
 
@@ -94,5 +94,61 @@ describe("geometry", () => {
   it("snaps to a step", () => {
     expect(snap({ x: 149, y: -151 }, 100)).toEqual({ x: 100, y: -200 });
     expect(snap({ x: 149, y: -151 }, 0)).toEqual({ x: 149, y: -151 });
+  });
+});
+
+describe("perimeter", () => {
+  const trail = [
+    { x: 0, y: 1000 },
+    { x: 1000, y: 1000 },
+    { x: 500, y: 2000 },
+    { x: 400, y: 1300 },
+  ];
+
+  it("keeps every point at least the margin inside, with at most 16 points", () => {
+    const polygon = perimeter(trail, 300);
+    expect(polygon.length).toBeLessThanOrEqual(16);
+    for (const p of trail) {
+      expect(insidePolygon(p, polygon)).toBe(true);
+      for (let i = 0; i < polygon.length; i++) {
+        expect(distanceToSegment(p, polygon[i], polygon[(i + 1) % polygon.length])).toBeGreaterThanOrEqual(299.9);
+      }
+    }
+  });
+
+  it("surrounds a single point", () => {
+    const polygon = perimeter([{ x: 0, y: 1000 }], 200);
+    // Its 16 edges would be about 80 mm, so some are left out
+    expect(polygon.length).toBeLessThan(16);
+    expect(polygon.length).toBeGreaterThanOrEqual(4);
+    expect(insidePolygon({ x: 0, y: 1000 }, polygon)).toBe(true);
+  });
+
+  it("leaves out very short edges", () => {
+    const polygon = perimeter(trail, 300);
+    for (let i = 0; i < polygon.length; i++) {
+      expect(distance(polygon[i], polygon[(i + 1) % polygon.length])).toBeGreaterThanOrEqual(300);
+    }
+  });
+
+  it("is empty without points", () => {
+    expect(perimeter([], 200)).toEqual([]);
+  });
+});
+
+describe("clipToRect", () => {
+  it("cuts a polygon to the rectangle", () => {
+    const square = [
+      { x: -100, y: -100 },
+      { x: 100, y: -100 },
+      { x: 100, y: 100 },
+      { x: -100, y: 100 },
+    ];
+    expect(clipToRect(square, { x: 0, y: 0 }, { x: 1000, y: 1000 })).toEqual([
+      { x: 0, y: 0 },
+      { x: 100, y: 0 },
+      { x: 100, y: 100 },
+      { x: 0, y: 100 },
+    ]);
   });
 });

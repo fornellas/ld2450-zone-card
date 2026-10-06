@@ -538,8 +538,43 @@ describe("ld2450-zone-card", () => {
         await update();
       };
       await update();
-      return { map, circles, move, toggle, update };
+      return { root, map, circles, move, toggle, update };
     }
+
+    it("fits the zone around the trail, as an edit that can be undone", async () => {
+      const { root, move, toggle, update } = await withTrail();
+      await toggle(true);
+      await move(0, 1000);
+      await move(1000, 1000);
+      await move(500, 2000);
+      const button = (label: string) =>
+        [...root.querySelectorAll("button")].find((b) => b.textContent!.includes(label)) as HTMLButtonElement;
+      const margin = root.querySelector(".fit-trail input") as HTMLInputElement;
+      expect(margin.value).toBe("0.3");
+      button("Fit zone to trail").click();
+      await update();
+      const value = root.querySelector(".device-value code")!.textContent!;
+      const points = value.split(";").map((p) => p.split(",").map(Number));
+      expect(points.length).toBeGreaterThanOrEqual(3);
+      expect(points.length).toBeLessThanOrEqual(16);
+      // At least the margin beyond the trail: the trail spans x 0..1000 and y 1000..2000
+      expect(Math.min(...points.map(([x]) => x))).toBeLessThanOrEqual(-300);
+      expect(Math.max(...points.map(([, y]) => y))).toBeGreaterThanOrEqual(2300);
+      button("Undo").click();
+      await update();
+      expect(root.querySelector(".device-value code")!.textContent).toBe("0,0;1000,0;1000,600");
+    });
+
+    it("isn't offered for the floor plan", async () => {
+      const { root, toggle, update } = await withTrail();
+      await toggle(true);
+      expect(root.querySelector(".fit-trail")).not.toBeNull();
+      const select = root.querySelectorAll("select")[1];
+      select.value = "floor-plan";
+      select.dispatchEvent(new Event("change"));
+      await update();
+      expect(root.querySelector(".fit-trail")).toBeNull();
+    });
 
     it("is off until turned on", async () => {
       const { circles, move } = await withTrail();
@@ -550,11 +585,8 @@ describe("ld2450-zone-card", () => {
     it("keeps where targets have been seen, once per position", async () => {
       const { circles, move, toggle } = await withTrail();
       await toggle(true);
-      expect(calls).toContainEqual({
-        type: "frontend/set_user_data",
-        key: "ld2450_zone_card",
-        value: { overlays: { trail: true } },
-      });
+      // Not saved: it's off again on every load
+      expect(calls.filter((c) => c.type === "frontend/set_user_data")).toEqual([]);
       await move(100, 1000);
       await move(100, 1000);
       await move(200, 1100);

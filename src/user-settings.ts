@@ -5,12 +5,7 @@ import type { Units } from "./units";
 
 const KEY = "ld2450_zone_card";
 
-export type Overlay = "trackingRange" | "pointLimits" | "floorPlan" | "trail";
-
-/** Whether an overlay is shown. The outlines are shown until turned off; the trail is off until turned on. */
-export function overlayShown(overlays: Partial<Record<Overlay, boolean>> | undefined, overlay: Overlay): boolean {
-  return overlays?.[overlay] ?? overlay !== "trail";
-}
+export type Overlay = "trackingRange" | "pointLimits" | "floorPlan";
 
 export interface UserSettings {
   units?: Units;
@@ -18,6 +13,8 @@ export interface UserSettings {
   snap?: boolean;
   /** Which helper outlines the map shows. All are shown until turned off. */
   overlays?: Partial<Record<Overlay, boolean>>;
+  /** Margin around the trail when fitting a zone to it, for each unit system, in mm. */
+  trailMargin?: Partial<Record<Units, number>>;
   /** Snap step for each unit system, in mm. */
   snapStep?: Partial<Record<Units, number>>;
 }

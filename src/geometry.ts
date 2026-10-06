@@ -47,3 +47,78 @@ export function insidePolygon(p: Point, polygon: Point[], tolerance = 1): boolea
   }
   return inside;
 }
+
+// Edge directions of the perimeter: every 22.5°, so it has at most 16 sides, well under the device's 23 points
+const PERIMETER_DIRECTIONS = 16;
+// Perimeter edges shorter than this, in mm, are dropped, so points don't bunch up
+const MIN_PERIMETER_EDGE = 300;
+
+/**
+ * A convex polygon around the points, keeping every point at least margin inside it. Its edges point in fixed
+ * directions, every 22.5°, each as close as the margin allows; edges that would be very short are left out, which
+ * only makes the polygon bigger. Its vertices go counter-clockwise.
+ */
+export function perimeter(points: Point[], margin: number): Point[] {
+  if (points.length === 0) return [];
+  // Each edge lies on n·p = support: as far out as the farthest point in that direction, plus the margin
+  const edges = Array.from({ length: PERIMETER_DIRECTIONS }, (_, k) => {
+    const a = (2 * Math.PI * k) / PERIMETER_DIRECTIONS;
+    const n = { x: Math.cos(a), y: Math.sin(a) };
+    return { k, n, support: Math.max(...points.map((p) => n.x * p.x + n.y * p.y)) + margin };
+  });
+  const corner = (a: (typeof edges)[number], b: (typeof edges)[number]): Point => {
+    const det = a.n.x * b.n.y - a.n.y * b.n.x;
+    return {
+      x: (a.support * b.n.y - b.support * a.n.y) / det,
+      y: (a.n.x * b.support - b.n.x * a.support) / det,
+    };
+  };
+  // Vertex i is where edge i meets edge i + 1, so edge i runs from vertex i - 1 to vertex i
+  const vertices = () => edges.map((e, i) => corner(e, edges[(i + 1) % edges.length]));
+  for (;;) {
+    const v = vertices();
+    let shortest = -1;
+    let shortestLength = MIN_PERIMETER_EDGE;
+    edges.forEach((_, i) => {
+      const previous = edges[(i + edges.length - 1) % edges.length];
+      const next = edges[(i + 1) % edges.length];
+      // Leaving an edge out joins its neighbours; keep them at most 90° apart, so corners are never sharper than
+      // right angles and the polygon only grows by about the edge's length
+      const gap = (next.k - previous.k + PERIMETER_DIRECTIONS) % PERIMETER_DIRECTIONS;
+      if (gap > PERIMETER_DIRECTIONS / 4) return;
+      const length = distance(v[(i + v.length - 1) % v.length], v[i]);
+      if (length < shortestLength) {
+        shortest = i;
+        shortestLength = length;
+      }
+    });
+    if (shortest < 0) return v;
+    edges.splice(shortest, 1);
+  }
+}
+
+/** Clip a convex polygon to an axis-aligned rectangle (Sutherland–Hodgman). */
+export function clipToRect(polygon: Point[], min: Point, max: Point): Point[] {
+  const edges: [(p: Point) => number, (a: Point, b: Point) => Point][] = [
+    [(p) => p.x - min.x, (a, b) => ({ x: min.x, y: a.y + ((b.y - a.y) * (min.x - a.x)) / (b.x - a.x) })],
+    [(p) => max.x - p.x, (a, b) => ({ x: max.x, y: a.y + ((b.y - a.y) * (max.x - a.x)) / (b.x - a.x) })],
+    [(p) => p.y - min.y, (a, b) => ({ x: a.x + ((b.x - a.x) * (min.y - a.y)) / (b.y - a.y), y: min.y })],
+    [(p) => max.y - p.y, (a, b) => ({ x: a.x + ((b.x - a.x) * (max.y - a.y)) / (b.y - a.y), y: max.y })],
+  ];
+  let output = polygon;
+  for (const [inside, cross] of edges) {
+    const input = output;
+    output = [];
+    for (let i = 0; i < input.length; i++) {
+      const current = input[i];
+      const previous = input[(i + input.length - 1) % input.length];
+      if (inside(current) >= 0) {
+        if (inside(previous) < 0) output.push(cross(previous, current));
+        output.push(current);
+      } else if (inside(previous) >= 0) {
+        output.push(cross(previous, current));
+      }
+    }
+  }
+  return output;
+}
