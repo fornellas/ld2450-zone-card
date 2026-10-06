@@ -554,7 +554,7 @@ describe("ld2450-zone-card", () => {
       await move(500, 2000);
       const button = (label: string) =>
         [...root.querySelectorAll("button")].find((b) => b.textContent!.includes(label)) as HTMLButtonElement;
-      const margin = root.querySelector(".fit-trail input") as HTMLInputElement;
+      const margin = root.querySelector(".trail .margin input") as HTMLInputElement;
       expect(margin.value).toBe("0.3");
       button("Fit zone to trail").click();
       await update();
@@ -573,12 +573,12 @@ describe("ld2450-zone-card", () => {
     it("isn't offered for the floor plan", async () => {
       const { root, toggle, update } = await withTrail();
       await toggle(true);
-      expect(root.querySelector(".fit-trail")).not.toBeNull();
+      expect(root.querySelector(".trail .fit")).not.toBeNull();
       const select = root.querySelectorAll("select")[1];
       select.value = "floor-plan";
       select.dispatchEvent(new Event("change"));
       await update();
-      expect(root.querySelector(".fit-trail")).toBeNull();
+      expect(root.querySelector(".trail .fit")).toBeNull();
     });
 
     it("is off until turned on", async () => {
@@ -603,7 +603,7 @@ describe("ld2450-zone-card", () => {
       const { root, circles, move, toggle, update } = await withTrail();
       await toggle(true);
       await move(100, 1000);
-      (root.querySelector(".trail button.link") as HTMLButtonElement).click();
+      (root.querySelector(".trail button.clear") as HTMLButtonElement).click();
       await update();
       expect(circles()).toBe(0);
       await move(200, 1000);

@@ -53,7 +53,7 @@ export class Ld2450MountEditor extends LitElement {
 
   private _renderNumber(field: Field, label: string, min: number, max: number, step: number) {
     return html`
-      <label>
+      <label class="inline">
         ${label}
         <input
           type="number"
@@ -116,12 +116,20 @@ export class Ld2450MountEditor extends LitElement {
       display: block;
     }
     .row {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      /* Labels may wrap on narrow screens; keep the inputs lined up */
-      align-items: end;
-      gap: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
       margin-top: 8px;
+    }
+    /* Each field on the same line as its label */
+    label.inline {
+      flex-direction: row;
+      align-items: center;
+      gap: 6px;
+    }
+    label.inline input {
+      width: 4.5em;
     }
     label {
       display: flex;

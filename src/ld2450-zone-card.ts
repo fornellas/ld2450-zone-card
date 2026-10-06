@@ -372,7 +372,7 @@ export class Ld2450ZoneCard extends LitElement {
         </label>
         ${
           this._snap
-            ? html`<label class="snap-step">
+            ? html`<label class="inline snap-step">
                 Step (${inputUnit(this._units)})
                 <input
                   type="number"
@@ -574,7 +574,7 @@ export class Ld2450ZoneCard extends LitElement {
         <span class="point-name">${point === undefined ? "No point selected" : `Point ${index! + 1}`}</span>
         ${(["x", "y"] as const).map(
           (axis) => html`
-            <label>
+            <label class="inline">
               ${axis.toUpperCase()} (${unit})
               <input
                 type="number"
@@ -599,6 +599,7 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   private _renderTrail(target: Target, mount: Mount, trail: Point[]) {
+    const isZone = target.kind === "zone";
     return html`
       <div class="trail">
         <label class="check">
@@ -610,16 +611,44 @@ export class Ld2450ZoneCard extends LitElement {
           Trail
         </label>
         ${
-          this._trailOn
-            ? html`<button
-                  class="link"
+          !this._trailOn
+            ? nothing
+            : html`
+                ${
+                  isZone
+                    ? html`<label class="inline margin">
+                        Margin (${inputUnit(this._units)})
+                        <input
+                          type="number"
+                          min="0"
+                          max=${toInputValue(MAX_TRAIL_MARGIN, this._units)}
+                          step=${this._units === "metric" ? 0.05 : 0.25}
+                          .value=${this._marginText ?? String(toInputValue(this._trailMargin, this._units))}
+                          @input=${this._marginInput}
+                          @change=${() => (this._marginText = undefined)}
+                        />
+                      </label>`
+                    : nothing
+                }
+                <button
+                  class="clear"
                   ?disabled=${trail.length === 0}
                   @click=${() => this._currentDevice && this._clearTrail(this._currentDevice)}
                 >
-                  Clear trail
+                  Clear
                 </button>
-                ${target.kind === "zone" ? this._renderFitToTrail(target, mount, trail) : nothing}`
-            : nothing
+                ${
+                  isZone
+                    ? html`<button
+                        class="fit"
+                        ?disabled=${trail.length === 0}
+                        @click=${() => this._fitToTrail(target, mount, trail)}
+                      >
+                        Fit zone to trail
+                      </button>`
+                    : nothing
+                }
+              `
         }
       </div>
     `;
@@ -760,28 +789,6 @@ export class Ld2450ZoneCard extends LitElement {
     this._trailOn = shown;
     // The trail starts afresh each time it's turned on
     if (!shown) this._clearTrail();
-  }
-
-  private _renderFitToTrail(target: Target, mount: Mount, trail: Point[]) {
-    return html`
-      <div class="fit-trail">
-        <label class="margin">
-          Margin (${inputUnit(this._units)})
-          <input
-            type="number"
-            min="0"
-            max=${toInputValue(MAX_TRAIL_MARGIN, this._units)}
-            step=${this._units === "metric" ? 0.05 : 0.25}
-            .value=${this._marginText ?? String(toInputValue(this._trailMargin, this._units))}
-            @input=${this._marginInput}
-            @change=${() => (this._marginText = undefined)}
-          />
-        </label>
-        <button ?disabled=${trail.length === 0} @click=${() => this._fitToTrail(target, mount, trail)}>
-          Fit zone to trail
-        </button>
-      </div>
-    `;
   }
 
   private get _trailMargin(): number {
@@ -1039,21 +1046,46 @@ export class Ld2450ZoneCard extends LitElement {
     details.grid > summary {
       margin-bottom: 8px;
     }
-    .point {
+    .point,
+    .trail {
       display: flex;
       flex-wrap: wrap;
-      align-items: flex-end;
+      align-items: center;
       gap: 8px 12px;
       margin-bottom: 12px;
     }
     .point-name {
-      flex: 1 1 100%;
       font-weight: 500;
     }
-    .point label {
-      flex: 1 1 100px;
+    /* A label with its field on the same line */
+    label.inline {
+      flex-direction: row;
+      align-items: center;
+      flex: 0 0 auto;
+      gap: 6px;
     }
-    .point input {
+    label.inline input {
+      width: 4.5em;
+    }
+    label.snap-step {
+      margin-top: 8px;
+    }
+    .trail button {
+      padding: 6px 12px;
+      font: inherit;
+      font-size: 0.9em;
+      color: var(--primary-color);
+      background: none;
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .trail button:disabled {
+      color: var(--disabled-text-color, #bdbdbd);
+      cursor: default;
+    }
+    .point input,
+    .trail input[type="number"] {
       padding: 4px 8px;
       font: inherit;
       color: var(--primary-text-color);
@@ -1065,36 +1097,8 @@ export class Ld2450ZoneCard extends LitElement {
     label.snap-points {
       margin-bottom: 8px;
     }
-    .trail {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 8px 16px;
-      margin-bottom: 12px;
-    }
-    .trail .fit-trail {
-      flex: 1 1 100%;
-      margin-top: 0;
-    }
-    button.link {
-      padding: 0;
-      font: inherit;
-      color: var(--primary-color);
-      background: none;
-      border: none;
-      cursor: pointer;
-      text-decoration: underline;
-    }
-    button.link:disabled {
-      color: var(--disabled-text-color, #bdbdbd);
-      cursor: default;
-    }
     details.grid ld2450-mount-editor {
       margin-top: 16px;
-    }
-    label.snap-step {
-      max-width: 160px;
-      margin-top: 8px;
     }
     label.snap-step input {
       padding: 4px 8px;
@@ -1175,39 +1179,6 @@ export class Ld2450ZoneCard extends LitElement {
     }
     .empty {
       color: var(--secondary-text-color);
-    }
-    .fit-trail {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-end;
-      gap: 8px 12px;
-      margin-top: 12px;
-    }
-    .fit-trail label.margin {
-      flex: 0 1 120px;
-    }
-    .fit-trail input {
-      padding: 4px 8px;
-      font: inherit;
-      color: var(--primary-text-color);
-      background: var(--card-background-color);
-      border: 1px solid var(--divider-color);
-      border-radius: 4px;
-      min-width: 0;
-    }
-    .fit-trail button {
-      padding: 6px 12px;
-      font: inherit;
-      font-size: 0.9em;
-      color: var(--primary-color);
-      background: none;
-      border: 1px solid var(--divider-color);
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .fit-trail button:disabled {
-      color: var(--disabled-text-color, #bdbdbd);
-      cursor: default;
     }
     .help {
       margin: 0 0 8px;
