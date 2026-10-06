@@ -42,8 +42,8 @@ export class Ld2450MountEditor extends LitElement {
         />
         Mirror X
       </label>
+      <div class="row">${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}</div>
       <div class="row">
-        ${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}
         ${this._renderNumber("x", `Radar X (${unit})`, -maxOffset, maxOffset, step)}
         ${this._renderNumber("y", `Radar Y (${unit})`, -maxOffset, maxOffset, step)}
       </div>
