@@ -19,8 +19,8 @@ describe("system settings", () => {
   });
 
   it.each([
-    [true, true],
-    [false, false],
+    [true, false],
+    [false, true],
   ])("converts v0.0.8 upsideDown %s to invertX %s", (upsideDown, invertX) => {
     const old = { upsideDown, rotation: 10, offset: { x: 1, y: 2 } };
     expect(deviceMount({ mounts: { dev1: old as never } }, "dev1")).toEqual({
@@ -45,7 +45,7 @@ describe("system settings", () => {
   });
 
   it("converts v0.0.14 floor plans from room coordinates", () => {
-    const mount = { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } };
+    const mount = { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } };
     const settings = { mounts: { dev1: mount }, floorPlans: { dev1: [{ x: 1000, y: 500 }] } };
     expect(deviceFloorPlan(settings, "dev1")).toEqual([{ x: 0, y: 500 }]);
   });

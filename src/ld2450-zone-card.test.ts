@@ -10,12 +10,9 @@ let systemData: unknown = null;
 let onService: (data: Record<string, unknown>, target?: { entity_id: string }) => Promise<unknown> = () =>
   Promise.resolve();
 
-// Shows radar coordinates as-is, so tests can read them directly
-const AS_IS = { invertX: true, rotation: 0, offset: { x: 0, y: 0 } };
-
 function hass(): HomeAssistant {
   calls = [];
-  systemData = { mounts: { dev1: AS_IS } };
+  systemData = null;
   onService = () => Promise.resolve();
   const states: HomeAssistant["states"] = {};
   const entities: HomeAssistant["entities"] = {};
@@ -132,14 +129,14 @@ describe("ld2450-zone-card", () => {
 
   it("uses the saved radar position and saves changes", async () => {
     const h = hass();
-    systemData = { mounts: { dev1: { invertX: false, rotation: 0, offset: { x: 0, y: 0 } } } };
+    systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 0, y: 0 } } } };
     const root = await renderCard({}, h);
     const map = root.querySelector("ld2450-zone-map") as unknown as {
       mount: unknown;
       updateComplete: Promise<unknown>;
     };
-    expect(map.mount).toEqual({ invertX: false, rotation: 0, offset: { x: 0, y: 0 } });
-    // Not inverting mirrors the radar's x
+    expect(map.mount).toEqual({ invertX: true, rotation: 0, offset: { x: 0, y: 0 } });
+    // Inverting mirrors the radar's x
     await map.updateComplete;
     expect((map as unknown as HTMLElement).shadowRoot!.querySelector(".readout")!.textContent).toContain("x 0.78 m");
 
@@ -378,10 +375,11 @@ describe("ld2450-zone-card", () => {
     });
 
     it("shows room coordinates and writes radar coordinates", async () => {
+      systemData = null;
       const h = hass();
-      systemData = { mounts: { dev1: { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } } } };
+      systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
       const root = await renderCard({}, h);
-      // Radar (1000,0) -> mirrored (-1000,0) -> offset (0,0)
+      // Radar (1000,0) -> inverted (-1000,0) -> offset (0,0)
       expect(root.querySelector("textarea")!.value).toBe("1000,0;0,0;0,600");
       expect(root.querySelector(".device-value code")!.textContent).toBe("0,0;1000,0;1000,600");
     });
@@ -444,7 +442,7 @@ describe("ld2450-zone-card", () => {
 
     it("is edited in room coordinates and saved for everyone", async () => {
       const h = hass();
-      systemData = { mounts: { dev1: { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } } } };
+      systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
       const { root, card, save } = await editFloorPlan(h);
       // Floor plans aren't written to the device
       expect(root.querySelector(".device-value")).toBeNull();
@@ -456,8 +454,8 @@ describe("ld2450-zone-card", () => {
         type: "frontend/set_system_data",
         key: "ld2450_zone_card",
         value: {
-          mounts: { dev1: { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } } },
-          // Stored in radar coordinates: room (-3000,-500) -> minus offset (-4000,-500) -> mirrored (4000,-500)
+          mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } },
+          // Stored in radar coordinates: room (-3000,-500) -> minus offset (-4000,-500) -> inverted (4000,-500)
           floorPlans: {
             dev1: {
               points: [
