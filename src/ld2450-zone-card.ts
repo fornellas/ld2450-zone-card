@@ -422,7 +422,7 @@ export class Ld2450ZoneCard extends LitElement {
                 ${targets.map((t) => {
                   const p = toRoom(t.point, mount);
                   return html`<li>
-                    <b>${t.label}</b> x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
+                    <b>#${t.label}</b> x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
                   </li>`;
                 })}
               </ul>`
