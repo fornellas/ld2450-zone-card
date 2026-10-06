@@ -422,7 +422,10 @@ export class Ld2450ZoneCard extends LitElement {
                 ${targets.map((t) => {
                   const p = toRoom(t.point, mount);
                   return html`<li>
-                    <b>#${t.label}</b> x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
+                    <span class="name">Target ${t.label}</span>
+                    <span class="position">
+                      x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
+                    </span>
                   </li>`;
                 })}
               </ul>`
@@ -1039,6 +1042,14 @@ export class Ld2450ZoneCard extends LitElement {
       padding: 0;
       list-style: none;
       font-variant-numeric: tabular-nums;
+    }
+    .targets .name {
+      font-weight: 500;
+      color: var(--primary-text-color);
+    }
+    .targets .position {
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
     }
     .targets .none {
       margin: 0;

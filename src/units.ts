@@ -4,8 +4,8 @@ export type Units = "metric" | "imperial";
 
 const MM_PER_FOOT = 304.8;
 
-/** Snap step until the user sets one, in mm: 10 cm or 6 in. */
-export const DEFAULT_SNAP: Record<Units, number> = { metric: 100, imperial: MM_PER_FOOT / 2 };
+/** Snap step until the user sets one, in mm: 5 cm or 2 in. */
+export const DEFAULT_SNAP: Record<Units, number> = { metric: 50, imperial: 50.8 };
 
 /** Snap steps the user can set, in mm. */
 export const MIN_SNAP = 10;

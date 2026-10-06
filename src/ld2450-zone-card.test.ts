@@ -420,17 +420,17 @@ describe("ld2450-zone-card", () => {
   it("sets the snap step per user", async () => {
     const root = await renderCard({}, hass());
     const map = root.querySelector("ld2450-zone-map") as unknown as { snapStep: number };
-    expect(map.snapStep).toBe(100);
+    expect(map.snapStep).toBe(50);
     const input = root.querySelector(".snap-step input") as HTMLInputElement;
-    input.value = "0.05";
+    input.value = "0.2";
     input.dispatchEvent(new Event("input"));
     await (root.host as Ld2450ZoneCard).updateComplete;
-    expect(map.snapStep).toBe(50);
+    expect(map.snapStep).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 600));
     expect(calls).toContainEqual({
       type: "frontend/set_user_data",
       key: "ld2450_zone_card",
-      value: { snapStep: { metric: 50 } },
+      value: { snapStep: { metric: 200 } },
     });
   });
 
