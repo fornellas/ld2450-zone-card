@@ -366,26 +366,28 @@ export class Ld2450ZoneCard extends LitElement {
       }
       <details class="grid">
         <summary>Grid</summary>
-        <label class="check">
-          <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
-          Snap to grid
-        </label>
-        ${
-          this._snap
-            ? html`<label class="inline snap-step">
-                Step (${inputUnit(this._units)})
-                <input
-                  type="number"
-                  min=${toInputValue(MIN_SNAP, this._units)}
-                  max=${toInputValue(MAX_SNAP, this._units)}
-                  step=${this._units === "metric" ? 0.01 : 0.05}
-                  .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
-                  @input=${this._snapStepInput}
-                  @change=${() => (this._snapText = undefined)}
-                />
-              </label>`
-            : nothing
-        }
+        <div class="snap-row">
+          <label class="check">
+            <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
+            Snap to grid
+          </label>
+          ${
+            this._snap
+              ? html`<label class="inline snap-step">
+                  Step (${inputUnit(this._units)})
+                  <input
+                    type="number"
+                    min=${toInputValue(MIN_SNAP, this._units)}
+                    max=${toInputValue(MAX_SNAP, this._units)}
+                    step=${this._units === "metric" ? 0.01 : 0.05}
+                    .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
+                    @input=${this._snapStepInput}
+                    @change=${() => (this._snapText = undefined)}
+                  />
+                </label>`
+              : nothing
+          }
+        </div>
         <ld2450-mount-editor
           .mount=${mount}
           .units=${this._units}
@@ -1067,8 +1069,12 @@ export class Ld2450ZoneCard extends LitElement {
     label.inline input {
       width: 4.5em;
     }
-    label.snap-step {
-      margin-top: 8px;
+    .snap-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      min-height: 2em;
     }
     .trail button {
       padding: 6px 12px;
