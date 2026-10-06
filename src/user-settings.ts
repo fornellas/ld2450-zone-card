@@ -5,7 +5,12 @@ import type { Units } from "./units";
 
 const KEY = "ld2450_zone_card";
 
-export type Overlay = "trackingRange" | "pointLimits" | "floorPlan";
+export type Overlay = "trackingRange" | "pointLimits" | "floorPlan" | "trail";
+
+/** Whether an overlay is shown. The outlines are shown until turned off; the trail is off until turned on. */
+export function overlayShown(overlays: Partial<Record<Overlay, boolean>> | undefined, overlay: Overlay): boolean {
+  return overlays?.[overlay] ?? overlay !== "trail";
+}
 
 export interface UserSettings {
   units?: Units;

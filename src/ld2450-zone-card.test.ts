@@ -496,7 +496,7 @@ describe("ld2450-zone-card", () => {
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
     const toggles = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle input")];
-    expect(toggles).toHaveLength(3);
+    expect(toggles).toHaveLength(4);
     toggles[2].checked = false;
     toggles[2].dispatchEvent(new Event("change"));
     await (root.host as Ld2450ZoneCard).updateComplete;
@@ -506,6 +506,76 @@ describe("ld2450-zone-card", () => {
       type: "frontend/set_user_data",
       key: "ld2450_zone_card",
       value: { overlays: { floorPlan: false } },
+    });
+  });
+
+  describe("trail", () => {
+    async function withTrail() {
+      const h = hass();
+      const root = await renderCard({}, h);
+      const card = root.host as Ld2450ZoneCard;
+      const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & {
+        updateComplete: Promise<unknown>;
+      };
+      const update = async () => {
+        await card.updateComplete;
+        await map.updateComplete;
+      };
+      const circles = () => map.shadowRoot!.querySelectorAll(".trail circle").length;
+      const move = async (x: number, y: number) => {
+        const states = { ...card.hass!.states };
+        states["sensor.t1_x"] = { ...states["sensor.t1_x"], state: String(x) };
+        states["sensor.t1_y"] = { ...states["sensor.t1_y"], state: String(y) };
+        card.hass = { ...card.hass!, states };
+        await update();
+      };
+      const toggle = async (on: boolean) => {
+        const input = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle")]
+          .find((l) => l.textContent!.includes("Trail"))!
+          .querySelector("input")!;
+        input.checked = on;
+        input.dispatchEvent(new Event("change"));
+        await update();
+      };
+      await update();
+      return { map, circles, move, toggle, update };
+    }
+
+    it("is off until turned on", async () => {
+      const { circles, move } = await withTrail();
+      await move(100, 1000);
+      expect(circles()).toBe(0);
+    });
+
+    it("keeps where targets have been seen, once per position", async () => {
+      const { circles, move, toggle } = await withTrail();
+      await toggle(true);
+      expect(calls).toContainEqual({
+        type: "frontend/set_user_data",
+        key: "ld2450_zone_card",
+        value: { overlays: { trail: true } },
+      });
+      await move(100, 1000);
+      await move(100, 1000);
+      await move(200, 1100);
+      // The position when it was turned on, and two moves
+      expect(circles()).toBe(3);
+    });
+
+    it("clears with the button, and when turned off", async () => {
+      const { map, circles, move, toggle, update } = await withTrail();
+      await toggle(true);
+      await move(100, 1000);
+      (map.shadowRoot!.querySelector("button.link") as HTMLButtonElement).click();
+      await update();
+      expect(circles()).toBe(0);
+      await move(200, 1000);
+      expect(circles()).toBe(1);
+      await toggle(false);
+      expect(circles()).toBe(0);
+      // Turned on again, it starts afresh from where the target is now
+      await toggle(true);
+      expect(circles()).toBe(1);
     });
   });
 

@@ -3,7 +3,7 @@ import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
 import { distance, insertionIndex, snap } from "./geometry";
 import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
-import type { Overlay } from "./user-settings";
+import { type Overlay, overlayShown } from "./user-settings";
 
 /** An edit from the map. */
 export interface DraftChange {
@@ -27,7 +27,6 @@ import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units"
 const RADAR_WIDTH = 440;
 const RADAR_DEPTH = 150;
 const HEADING_LENGTH = 700;
-const TARGET_RADIUS = 180;
 // Smallest area the map shows, in mm, so a lone small zone doesn't fill it
 const MIN_MAP_SIZE = 2000;
 // Pointer movement, in screen pixels, before pressing a point becomes dragging it
@@ -89,6 +88,7 @@ export class Ld2450ZoneMap extends LitElement {
     floorPlan: { attribute: false },
     editingFloorPlan: { type: Boolean },
     overlays: { attribute: false },
+    trail: { attribute: false },
     editable: { type: Boolean },
     draft: { attribute: false },
     deviceOutline: { attribute: false },
@@ -107,8 +107,10 @@ export class Ld2450ZoneMap extends LitElement {
   floorPlan: Point[] = [];
   /** The floor plan is the polygon being edited, so the editor draws it instead. */
   editingFloorPlan = false;
-  /** Which helper outlines to show; missing ones are shown. */
+  /** Which overlays to show; see overlayShown() for the defaults. */
   overlays: Partial<Record<Overlay, boolean>> = {};
+  /** Where targets have been seen, in radar coordinates, drawn when the trail is shown. */
+  trail: Point[] = [];
   editable = false;
   /** The selected zone's points being edited, in radar coordinates. */
   draft: Point[] = [];
@@ -181,13 +183,21 @@ export class Ld2450ZoneMap extends LitElement {
         }
         ${this._shown("pointLimits") ? svg`<polygon class="bounds" points=${pointsAttr(bounds)}></polygon>` : nothing}
         ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
-        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTargets(font)}
+        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTrail(font)} ${this._renderTargets(font)}
         ${this.editable ? this._renderEditor(font) : nothing}
       </svg>
       <div class="legend">
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
         ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
         ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
+        <span class="trail-toggle">
+          ${this._renderToggle("trail", "trail", "Trail")}
+          ${
+            this._shown("trail") && this.trail.length > 0
+              ? html`<button class="link" @click=${() => this._emit("trail-cleared", undefined)}>Clear</button>`
+              : nothing
+          }
+        </span>
         <span><i class="swatch zone"></i>Selected zone</span>
         <span><i class="swatch occupied"></i>Occupied</span>
         <span><i class="swatch target"></i>Targets</span>
@@ -209,7 +219,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _shown(overlay: Overlay): boolean {
-    return this.overlays[overlay] ?? true;
+    return overlayShown(this.overlays, overlay);
   }
 
   /** A legend entry that shows or hides an outline. Fires "overlay-toggled" with { overlay, shown }. */
@@ -253,14 +263,32 @@ export class Ld2450ZoneMap extends LitElement {
     `;
   }
 
+  /** Targets are drawn just big enough for their number. */
+  private _targetRadius(font: number): number {
+    return font * 0.7;
+  }
+
+  private _renderTrail(font: number) {
+    if (!this._shown("trail")) return nothing;
+    const r = this._targetRadius(font);
+    return svg`
+      <g class="trail">
+        ${this.trail.map((point) => {
+          const p = toRoom(point, this.mount);
+          return svg`<circle cx=${p.x} cy=${-p.y} r=${r}></circle>`;
+        })}
+      </g>
+    `;
+  }
+
   private _renderTargets(font: number) {
     return this.targets.map((t) => {
       const p = toRoom(t.point, this.mount);
       return svg`
         <g class="target">
           <title>${t.name}: x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}</title>
-          <circle cx=${p.x} cy=${-p.y} r=${TARGET_RADIUS}></circle>
-          <text x=${p.x} y=${-p.y} style="font-size: ${font}px" text-anchor="middle" dominant-baseline="central">
+          <circle cx=${p.x} cy=${-p.y} r=${this._targetRadius(font)}></circle>
+          <text x=${p.x} y=${-p.y} style="font-size: ${font * 0.9}px" text-anchor="middle" dominant-baseline="central">
             ${t.label}
           </text>
         </g>
@@ -610,6 +638,32 @@ export class Ld2450ZoneMap extends LitElement {
     .zone.selected text {
       fill: var(--primary-text-color);
       font-weight: 500;
+    }
+    .trail circle {
+      fill: none;
+      stroke: var(--accent-color, #ff9800);
+      stroke-width: 1;
+      stroke-opacity: 0.5;
+      vector-effect: non-scaling-stroke;
+    }
+    .trail-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button.link {
+      padding: 0;
+      font: inherit;
+      color: var(--primary-color);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    .swatch.trail {
+      width: 10px;
+      border-radius: 50%;
+      border: 1px solid color-mix(in srgb, var(--accent-color, #ff9800) 50%, transparent);
     }
     .target circle {
       fill: var(--accent-color, #ff9800);

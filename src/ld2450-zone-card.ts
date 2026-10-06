@@ -15,7 +15,7 @@ import {
   parsePolygon,
 } from "./polygon";
 import { formatRoomText, parseRoomText, textUnit } from "./polygon-text";
-import { readTargets } from "./targets";
+import { type TargetPosition, readTargets } from "./targets";
 import {
   type SystemSettings,
   deviceFloorPlan,
@@ -36,7 +36,7 @@ import {
   inputUnit,
   toInputValue,
 } from "./units";
-import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import { type Overlay, type UserSettings, fetchUserSettings, overlayShown, saveUserSettings } from "./user-settings";
 import "./mount-editor";
 import "./zone-map";
 import type { DraftChange } from "./zone-map";
@@ -52,6 +52,8 @@ type Target = { kind: "zone"; key: string; zone: Zone } | { kind: "floorPlan"; k
 
 // Most undo steps kept for each polygon
 const MAX_UNDO = 100;
+// Most target positions kept in the trail of each device
+const MAX_TRAIL = 1000;
 
 /** Drafts before (undo) and after (redo) each change; undefined is "no draft", i.e. what's saved. */
 interface History {
@@ -145,6 +147,10 @@ export class Ld2450ZoneCard extends LitElement {
   private _history: Record<string, History> = {};
   /** What's being edited, for keyboard shortcuts. */
   private _currentTarget?: Target;
+  /** Where targets have been seen while the trail is on, in radar coordinates, by device. Kept in this page only. */
+  private _trails: Record<string, Point[]> = {};
+  /** The last position recorded for each target, so a target standing still isn't recorded again and again. */
+  private _trailLast: Record<string, Record<string, string>> = {};
 
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
@@ -267,6 +273,8 @@ export class Ld2450ZoneCard extends LitElement {
     this._currentTarget = target;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
+    const targets = readTargets(this.hass!, device.targets);
+    if (overlayShown(this._userSettings?.overlays, "trail")) this._recordTrail(device.id, targets);
     return html`
       <div class="selectors">
         <label>
@@ -309,7 +317,9 @@ export class Ld2450ZoneCard extends LitElement {
       <ld2450-zone-map
         .mount=${mount}
         .units=${this._units}
-        .targets=${readTargets(this.hass!, device.targets)}
+        .targets=${targets}
+        .trail=${this._trails[device.id] ?? []}
+        @trail-cleared=${() => this._clearTrail(device.id)}
         ?offline=${offline}
         .floorPlan=${floorPlan}
         ?editingFloorPlan=${target?.kind === "floorPlan"}
@@ -643,7 +653,33 @@ export class Ld2450ZoneCard extends LitElement {
     this._snapSaveTimer = setTimeout(() => this._saveUserSettings(), SAVE_DELAY_MS);
   }
 
+  /** Add where targets are now to the device's trail. */
+  private _recordTrail(deviceId: string, targets: TargetPosition[]): void {
+    const last = (this._trailLast[deviceId] ??= {});
+    let trail = this._trails[deviceId] ?? [];
+    for (const target of targets) {
+      const key = `${target.point.x},${target.point.y}`;
+      if (last[target.label] === key) continue;
+      last[target.label] = key;
+      // A new array, so the map redraws
+      trail = [...trail, target.point].slice(-MAX_TRAIL);
+    }
+    this._trails[deviceId] = trail;
+  }
+
+  private _clearTrail(deviceId?: string): void {
+    if (deviceId === undefined) {
+      this._trails = {};
+      this._trailLast = {};
+    } else {
+      this._trails = { ...this._trails, [deviceId]: [] };
+    }
+    this.requestUpdate();
+  }
+
   private _toggleOverlay(overlay: Overlay, shown: boolean): void {
+    // The trail starts afresh each time it's turned on
+    if (overlay === "trail" && !shown) this._clearTrail();
     this._userSettings = { ...this._userSettings, overlays: { ...this._userSettings?.overlays, [overlay]: shown } };
     this._saveUserSettings();
   }
