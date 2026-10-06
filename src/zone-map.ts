@@ -84,7 +84,6 @@ export class Ld2450ZoneMap extends LitElement {
     units: { attribute: false },
     targets: { attribute: false },
     zones: { attribute: false },
-    offline: { type: Boolean },
     floorPlan: { attribute: false },
     editingFloorPlan: { type: Boolean },
     overlays: { attribute: false },
@@ -96,14 +95,13 @@ export class Ld2450ZoneMap extends LitElement {
     outside: { attribute: false },
     selectedVertex: { attribute: false },
     snapStep: { attribute: false },
+    snapToPoints: { type: Boolean },
   };
 
   mount: Mount = DEFAULT_MOUNT;
   units: Units = "metric";
   targets: TargetPosition[] = [];
   zones: MapZone[] = [];
-  /** The radar is offline, so there are no targets to show. */
-  offline = false;
   /** The saved floor plan, in radar coordinates. */
   floorPlan: Point[] = [];
   /** The floor plan is the polygon being edited, so the editor draws it instead. */
@@ -112,7 +110,7 @@ export class Ld2450ZoneMap extends LitElement {
   overlays: Partial<Record<Overlay, boolean>> = {};
   /** Where targets have been seen, in radar coordinates. */
   trail: Point[] = [];
-  /** Show the trail. Toggling it fires "trail-toggled" with { shown }. */
+  /** Show the trail. */
   trailShown = false;
   editable = false;
   /** The selected zone's points being edited, in radar coordinates. */
@@ -124,6 +122,10 @@ export class Ld2450ZoneMap extends LitElement {
   selectedVertex?: number;
   /** Snap edited points to multiples of this, in room mm. 0 doesn't snap. */
   snapStep = 0;
+  /** Snap edited points onto nearby points of the floor plan and the other zones. */
+  snapToPoints = false;
+  /** Points edited points can snap onto, in room coordinates. */
+  private _snapPoints: Point[] = [];
 
   /** Size of a point handle, in room mm. */
   private _handle = 100;
@@ -166,6 +168,13 @@ export class Ld2450ZoneMap extends LitElement {
     const viewBox = `${view.minX} ${-view.maxY} ${view.maxX - view.minX} ${view.maxY - view.minY}`;
     const mmPerPx = this._widthPx > 0 ? (view.maxX - view.minX) / this._widthPx : 0;
     this._hitRadius = Math.max(this._handle, MIN_HIT_RADIUS_PX * mmPerPx);
+    // Everything shown but the polygon being edited
+    this._snapPoints = [
+      ...(this.editingFloorPlan ? [] : floorPlan),
+      ...this.zones
+        .filter((z) => this.editingFloorPlan || !z.selected)
+        .flatMap((z) => z.points.map((p) => toRoom(p, this.mount))),
+    ];
 
     return html`
       <svg
@@ -193,37 +202,9 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
         ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
         ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
-        <span class="trail-toggle">
-          <label class="toggle">
-            <input
-              type="checkbox"
-              .checked=${this.trailShown}
-              @change=${(ev: Event) => this._emit("trail-toggled", { shown: (ev.target as HTMLInputElement).checked })}
-            />
-            <i class="swatch trail"></i>Trail
-          </label>
-          ${
-            this.trailShown && this.trail.length > 0
-              ? html`<button class="link" @click=${() => this._emit("trail-cleared", undefined)}>Clear</button>`
-              : nothing
-          }
-        </span>
         <span><i class="swatch zone"></i>Selected zone</span>
         <span><i class="swatch occupied"></i>Occupied</span>
         <span><i class="swatch target"></i>Targets</span>
-      </div>
-      <div class="readout">
-        ${this._renderSelectedVertex()}
-        ${
-          this.targets.length === 0
-            ? html`<span>${this.offline ? "Radar offline" : "No targets tracked"}</span>`
-            : this.targets.map((t) => {
-                const p = toRoom(t.point, this.mount);
-                return html`<span>
-                  <b>${t.label}</b> x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}
-                </span>`;
-              })
-        }
       </div>
     `;
   }
@@ -414,16 +395,6 @@ export class Ld2450ZoneMap extends LitElement {
     if (this.hasUpdated && this._resizeObserver === undefined) this.firstUpdated();
   }
 
-  private _renderSelectedVertex() {
-    if (!this.editable || this.selectedVertex === undefined) return nothing;
-    const point = this.draft[this.selectedVertex];
-    if (point === undefined) return nothing;
-    const p = toRoom(point, this.mount);
-    return html`<span>
-      <b>Point ${this.selectedVertex + 1}</b> x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}
-    </span>`;
-  }
-
   /** Where a pointer is, in room coordinates. */
   private _roomPoint(ev: MouseEvent): Point | undefined {
     const svgEl = this.renderRoot.querySelector("svg");
@@ -435,6 +406,19 @@ export class Ld2450ZoneMap extends LitElement {
 
   /** A point from the user, snapped in room coordinates, as radar coordinates. */
   private _toDraftPoint(room: Point): Point {
+    if (this.snapToPoints) {
+      // The nearest point within reach of a finger wins over the grid
+      let nearest: Point | undefined;
+      let nearestDistance = this._hitRadius;
+      for (const p of this._snapPoints) {
+        const d = distance(p, room);
+        if (d <= nearestDistance) {
+          nearest = p;
+          nearestDistance = d;
+        }
+      }
+      if (nearest !== undefined) return toRadar(nearest, this.mount);
+    }
     return toRadar(snap(room, this.snapStep), this.mount);
   }
 
@@ -656,25 +640,6 @@ export class Ld2450ZoneMap extends LitElement {
       stroke-opacity: 0.5;
       vector-effect: non-scaling-stroke;
     }
-    .trail-toggle {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-    }
-    button.link {
-      padding: 0;
-      font: inherit;
-      color: var(--primary-color);
-      background: none;
-      border: none;
-      cursor: pointer;
-      text-decoration: underline;
-    }
-    .swatch.trail {
-      width: 10px;
-      border-radius: 50%;
-      border: 1px solid color-mix(in srgb, var(--accent-color, #ff9800) 50%, transparent);
-    }
     .target circle {
       fill: var(--accent-color, #ff9800);
       stroke: var(--card-background-color, #fff);
@@ -684,15 +649,6 @@ export class Ld2450ZoneMap extends LitElement {
     .target text {
       fill: var(--text-accent-color, #fff);
       font-weight: 700;
-    }
-    .readout {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 16px;
-      margin-top: 4px;
-      font-size: 0.85em;
-      font-variant-numeric: tabular-nums;
-      color: var(--secondary-text-color);
     }
     .legend {
       display: flex;

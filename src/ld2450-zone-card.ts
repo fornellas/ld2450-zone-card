@@ -18,7 +18,6 @@ import {
   formatPolygon,
   parsePolygon,
 } from "./polygon";
-import { formatRoomText, parseRoomText, textUnit } from "./polygon-text";
 import { type TargetPosition, readTargets } from "./targets";
 import {
   type SystemSettings,
@@ -38,6 +37,7 @@ import {
   MIN_SNAP,
   type Units,
   defaultUnits,
+  formatLength,
   fromInputValue,
   inputUnit,
   toInputValue,
@@ -119,7 +119,7 @@ export class Ld2450ZoneCard extends LitElement {
     _saveResult: { state: true },
     _drafts: { state: true },
     _selectedVertex: { state: true },
-    _text: { state: true },
+    _pointText: { state: true },
     _history: { state: true },
     _trailOn: { state: true },
     _marginText: { state: true },
@@ -149,12 +149,14 @@ export class Ld2450ZoneCard extends LitElement {
   /** Edited polygons not saved yet, in radar coordinates, by target key. */
   private _drafts: Record<string, Point[]> = {};
   private _selectedVertex?: number;
-  /** The polygon text while the user is typing it, with why it can't be read, if so. */
-  private _text?: { value: string; error?: string };
+  /** A coordinate of the selected point while the user is typing it. */
+  private _pointText?: { axis: "x" | "y"; value: string };
   /** Undo and redo, by target key. */
   private _history: Record<string, History> = {};
   /** What's being edited, for keyboard shortcuts. */
   private _currentTarget?: Target;
+  /** The device shown. */
+  private _currentDevice?: string;
   /** Whether the trail is on. Off on every load. */
   private _trailOn = false;
   /** The trail margin while the user is typing it. */
@@ -284,6 +286,7 @@ export class Ld2450ZoneCard extends LitElement {
     const floorPlan = deviceFloorPlan(this._systemSettings, device.id);
     const target = this._target(device);
     this._currentTarget = target;
+    this._currentDevice = device.id;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
     const targets = readTargets(this.hass!, device.targets);
@@ -333,9 +336,6 @@ export class Ld2450ZoneCard extends LitElement {
         .targets=${targets}
         .trail=${this._trails[device.id] ?? []}
         ?trailShown=${this._trailOn}
-        @trail-toggled=${(ev: CustomEvent<{ shown: boolean }>) => this._toggleTrail(ev.detail.shown)}
-        @trail-cleared=${() => this._clearTrail(device.id)}
-        ?offline=${offline}
         .floorPlan=${floorPlan}
         ?editingFloorPlan=${target?.kind === "floorPlan"}
         .overlays=${this._userSettings?.overlays ?? {}}
@@ -351,51 +351,48 @@ export class Ld2450ZoneCard extends LitElement {
         .outside=${editing?.check.outside ?? []}
         .selectedVertex=${this._selectedVertex}
         .snapStep=${this._snap ? this._snapStep : 0}
+        ?snapToPoints=${this._snapToPoints}
         @draft-changed=${(ev: CustomEvent<DraftChange>) =>
           target && this._setDraft(target, ev.detail.points, ev.detail.gesture)}
-        @vertex-selected=${(ev: CustomEvent<number | undefined>) => (this._selectedVertex = ev.detail)}
+        @vertex-selected=${(ev: CustomEvent<number | undefined>) => this._selectVertex(ev.detail)}
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
-      ${this._trailOn && target?.kind === "zone" ? this._renderFitToTrail(target, mount, device) : nothing}
-      ${target === undefined || editing === undefined ? nothing : this._renderEditor(target, editing, offline)}
-      <details class="advanced">
-        <summary>Advanced</summary>
-        ${target === undefined || editing === undefined ? nothing : this._renderPointsText(target, mount, editing)}
-        <section>
-          <h3>Snap grid</h3>
-          <label class="check">
-            <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
-            Snap points to the grid
-          </label>
-          <label class="snap-step">
-            Step (${inputUnit(this._units)})
-            <input
-              type="number"
-              min=${toInputValue(MIN_SNAP, this._units)}
-              max=${toInputValue(MAX_SNAP, this._units)}
-              step=${this._units === "metric" ? 0.01 : 0.05}
-              .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
-              ?disabled=${!this._snap}
-              @input=${this._snapStepInput}
-              @change=${() => (this._snapText = undefined)}
-            />
-          </label>
-        </section>
-        <section>
-          <h3>Radar position</h3>
-          <ld2450-mount-editor
-            .mount=${mount}
-            .units=${this._units}
-            ?disabled=${!this._isAdmin || this._systemSettings === undefined}
-            @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
-          ></ld2450-mount-editor>
-          ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
-        </section>
-      </details>
-      <details>
-        <summary>Entities</summary>
-        ${target?.kind === "zone" ? this._renderZone(target.zone) : nothing} ${this._renderTargets(device)}
+      ${this._renderTargetPositions(targets, mount, offline)}
+      ${
+        target === undefined || editing === undefined
+          ? nothing
+          : this._renderEditor(target, mount, editing, offline, this._trails[device.id] ?? [])
+      }
+      <details class="grid">
+        <summary>Grid</summary>
+        <label class="check">
+          <input type="checkbox" .checked=${this._snap} @change=${this._snapChanged} />
+          Snap to grid
+        </label>
+        ${
+          this._snap
+            ? html`<label class="snap-step">
+                Step (${inputUnit(this._units)})
+                <input
+                  type="number"
+                  min=${toInputValue(MIN_SNAP, this._units)}
+                  max=${toInputValue(MAX_SNAP, this._units)}
+                  step=${this._units === "metric" ? 0.01 : 0.05}
+                  .value=${this._snapText ?? String(toInputValue(this._snapStep, this._units))}
+                  @input=${this._snapStepInput}
+                  @change=${() => (this._snapText = undefined)}
+                />
+              </label>`
+            : nothing
+        }
+        <ld2450-mount-editor
+          .mount=${mount}
+          .units=${this._units}
+          ?disabled=${!this._isAdmin || this._systemSettings === undefined}
+          @mount-changed=${(ev: CustomEvent<Mount>) => this._mountChanged(device.id, ev.detail)}
+        ></ld2450-mount-editor>
+        ${this._mountError === undefined ? nothing : html`<p class="error">${this._mountError}</p>`}
       </details>
       ${
         device.warnings.length === 0
@@ -404,6 +401,31 @@ export class Ld2450ZoneCard extends LitElement {
               ${device.warnings.map((w) => html`<li>${w}</li>`)}
             </ul>`
       }
+      <details>
+        <summary>Entities</summary>
+        ${target?.kind === "zone" ? this._renderZone(target.zone) : nothing} ${this._renderTargets(device)}
+      </details>
+    `;
+  }
+
+  /** Where the targets are now, in room coordinates. */
+  private _renderTargetPositions(targets: TargetPosition[], mount: Mount, offline: boolean) {
+    return html`
+      <section class="targets">
+        <h3>Targets</h3>
+        ${
+          targets.length === 0
+            ? html`<p class="none">${offline ? "Radar offline" : "No targets tracked"}</p>`
+            : html`<ul>
+                ${targets.map((t) => {
+                  const p = toRoom(t.point, mount);
+                  return html`<li>
+                    <b>${t.label}</b> x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
+                  </li>`;
+                })}
+              </ul>`
+        }
+      </section>
     `;
   }
 
@@ -442,7 +464,7 @@ export class Ld2450ZoneCard extends LitElement {
     };
   }
 
-  private _renderEditor(target: Target, editing: Editing, offline: boolean) {
+  private _renderEditor(target: Target, mount: Mount, editing: Editing, offline: boolean, trail: Point[]) {
     const { points, check } = editing;
     const isZone = target.kind === "zone";
     const maxPoints = isZone ? POLYGON_MAX_POINTS : FLOOR_PLAN_MAX_POINTS;
@@ -452,7 +474,6 @@ export class Ld2450ZoneCard extends LitElement {
     const canSave =
       editing.dirty &&
       check.errors.length === 0 &&
-      this._text?.error === undefined &&
       editing.savedPoints !== undefined &&
       this._saving === undefined &&
       (isZone || (this._isAdmin && this._systemSettings !== undefined));
@@ -467,7 +488,8 @@ export class Ld2450ZoneCard extends LitElement {
           : "The device hasn't reported this zone yet, so changes can't be saved now.";
     }
     return html`
-      <div class="editor">
+      <details class="edit" open>
+        <summary>Edit</summary>
         <p class="help">
           ${
             full
@@ -476,6 +498,16 @@ export class Ld2450ZoneCard extends LitElement {
           }
           Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
+        ${this._renderSelectedPoint(target, mount, editing)}
+        <label class="check snap-points">
+          <input
+            type="checkbox"
+            .checked=${this._snapToPoints}
+            @change=${(ev: Event) => this._setUserSetting({ snapToPoints: (ev.target as HTMLInputElement).checked })}
+          />
+          Snap to nearby points
+        </label>
+        ${this._renderTrail(target, mount, trail)}
         <div class="edit-toolbar">
           <button
             title="Undo (Ctrl+Z)"
@@ -515,10 +547,9 @@ export class Ld2450ZoneCard extends LitElement {
           ${editing.dirty ? html`<span class="dirty">Unsaved changes</span>` : nothing}
         </div>
         ${
-          this._text?.error === undefined && check.errors.length === 0
+          check.errors.length === 0
             ? nothing
             : html`<ul class="errors">
-                ${this._text?.error === undefined ? nothing : html`<li>${this._text.error}</li>`}
                 ${check.errors.map((e) => html`<li>${e}</li>`)}
               </ul>`
         }
@@ -529,35 +560,68 @@ export class Ld2450ZoneCard extends LitElement {
                 ${check.warnings.map((w) => html`<li>${w}</li>`)}
               </ul>`
         }
+      </details>
+    `;
+  }
+
+  /** The selected point's coordinates, in room coordinates and the selected units, to read or type. */
+  private _renderSelectedPoint(target: Target, mount: Mount, editing: Editing) {
+    const index = this._selectedVertex;
+    const point = index === undefined ? undefined : editing.roomPoints[index];
+    const unit = inputUnit(this._units);
+    return html`
+      <div class="point">
+        <span class="point-name">${point === undefined ? "No point selected" : `Point ${index! + 1}`}</span>
+        ${(["x", "y"] as const).map(
+          (axis) => html`
+            <label>
+              ${axis.toUpperCase()} (${unit})
+              <input
+                type="number"
+                step=${this._units === "metric" ? 0.01 : 0.05}
+                ?disabled=${point === undefined}
+                .value=${
+                  point === undefined
+                    ? ""
+                    : this._pointText?.axis === axis
+                      ? this._pointText.value
+                      : String(toInputValue(point[axis], this._units))
+                }
+                @input=${(ev: Event) =>
+                  this._pointInput(target, mount, editing, axis, (ev.target as HTMLInputElement).value)}
+                @change=${this._pointChange}
+              />
+            </label>
+          `,
+        )}
       </div>
     `;
   }
 
-  private _renderPointsText(target: Target, mount: Mount, editing: Editing) {
-    const text = this._text?.value ?? formatRoomText(editing.roomPoints, this._units);
-    const deviceValue = formatPolygon(editing.points);
+  private _renderTrail(target: Target, mount: Mount, trail: Point[]) {
     return html`
-      <section>
-        <h3>Points</h3>
-        <label class="points">
-          x,y in ${textUnit(this._units)}, room coordinates
-          <textarea
-            rows="3"
-            spellcheck="false"
-            .value=${text}
-            @input=${(ev: Event) => this._textInput(target, mount, (ev.target as HTMLTextAreaElement).value)}
-            @change=${this._textChange}
-          ></textarea>
+      <div class="trail">
+        <label class="check">
+          <input
+            type="checkbox"
+            .checked=${this._trailOn}
+            @change=${(ev: Event) => this._toggleTrail((ev.target as HTMLInputElement).checked)}
+          />
+          Trail
         </label>
         ${
-          target.kind === "zone"
-            ? html`<div class="device-value">
-                <span>To write to the device (radar mm):</span>
-                <code>${deviceValue === "" ? "(empty: zone disabled)" : deviceValue}</code>
-              </div>`
+          this._trailOn
+            ? html`<button
+                  class="link"
+                  ?disabled=${trail.length === 0}
+                  @click=${() => this._currentDevice && this._clearTrail(this._currentDevice)}
+                >
+                  Clear trail
+                </button>
+                ${target.kind === "zone" ? this._renderFitToTrail(target, mount, trail) : nothing}`
             : nothing
         }
-      </section>
+      </div>
     `;
   }
 
@@ -641,7 +705,6 @@ export class Ld2450ZoneCard extends LitElement {
     if (draft === undefined || formatPolygon(draft) !== value) return;
     const { [key]: _, ...rest } = this._drafts;
     this._drafts = rest;
-    this._text = undefined;
   }
 
   private get _snapStep(): number {
@@ -699,8 +762,7 @@ export class Ld2450ZoneCard extends LitElement {
     if (!shown) this._clearTrail();
   }
 
-  private _renderFitToTrail(target: Target, mount: Mount, device: Ld2450Device) {
-    const trail = this._trails[device.id] ?? [];
+  private _renderFitToTrail(target: Target, mount: Mount, trail: Point[]) {
     return html`
       <div class="fit-trail">
         <label class="margin">
@@ -781,7 +843,7 @@ export class Ld2450ZoneCard extends LitElement {
     } else {
       this._drafts = { ...this._drafts, [key]: draft };
     }
-    this._text = undefined;
+    this._pointText = undefined;
     this._selectedVertex = undefined;
     this._saveResult = undefined;
   }
@@ -828,7 +890,7 @@ export class Ld2450ZoneCard extends LitElement {
   private _setDraft(target: Target, points: Point[], gesture?: string): void {
     this._remember(target.key, gesture);
     this._drafts = { ...this._drafts, [target.key]: points };
-    this._text = undefined;
+    this._pointText = undefined;
     this._saveResult = undefined;
     if (this._selectedVertex !== undefined && this._selectedVertex >= points.length) this._selectedVertex = undefined;
   }
@@ -848,27 +910,40 @@ export class Ld2450ZoneCard extends LitElement {
     this._putDraft(target.key, undefined);
   }
 
-  private _textInput(target: Target, mount: Mount, value: string): void {
-    const parsed = parseRoomText(value, this._units);
-    if (typeof parsed === "string") {
-      // Keep what was typed, and the last polygon that could be read
-      this._text = { value, error: parsed };
-      return;
-    }
-    // Typing until the text loses focus is undone in one step
-    this._remember(target.key, "typing");
-    this._drafts = { ...this._drafts, [target.key]: parsed.map((p) => toRadar(p, mount)) };
-    this._text = { value };
-    this._saveResult = undefined;
-    this._selectedVertex = undefined;
+  private _selectVertex(index: number | undefined): void {
+    this._selectedVertex = index;
+    this._pointText = undefined;
   }
 
-  /** Leaving the text: show the polygon in use, unless the text can't be read and still needs fixing. */
-  private _textChange(): void {
-    if (this._text?.error === undefined) this._text = undefined;
+  /** Typing a coordinate of the selected point moves it. Typing until the field loses focus is undone in one step. */
+  private _pointInput(target: Target, mount: Mount, editing: Editing, axis: "x" | "y", text: string): void {
+    const index = this._selectedVertex;
+    const value = Number(text);
+    if (index === undefined || text.trim() === "" || !Number.isFinite(value)) return;
+    const room = { ...editing.roomPoints[index], [axis]: fromInputValue(value, this._units) };
+    const points = [...editing.points];
+    points[index] = toRadar(room, mount);
+    this._setDraft(target, points, `point-${index}-${axis}`);
+    this._pointText = { axis, value: text };
+  }
+
+  /** Leaving a coordinate: show the value in use, and start a new undo step. */
+  private _pointChange(): void {
+    this._pointText = undefined;
     for (const [key, history] of Object.entries(this._history)) {
-      if (history.gesture === "typing") this._history = { ...this._history, [key]: { ...history, gesture: undefined } };
+      if (history.gesture?.startsWith("point-")) {
+        this._history = { ...this._history, [key]: { ...history, gesture: undefined } };
+      }
     }
+  }
+
+  private get _snapToPoints(): boolean {
+    return this._userSettings?.snapToPoints ?? true;
+  }
+
+  private _setUserSetting(change: Partial<UserSettings>): void {
+    this._userSettings = { ...this._userSettings, ...change };
+    this._saveUserSettings();
   }
 
   private get _snap(): boolean {
@@ -928,37 +1003,98 @@ export class Ld2450ZoneCard extends LitElement {
   private _deviceChanged(ev: Event): void {
     this._deviceId = (ev.target as HTMLSelectElement).value;
     this._zoneId = undefined;
-    this._selectedVertex = undefined;
-    this._text = undefined;
+    this._selectVertex(undefined);
   }
 
   private _zoneChanged(ev: Event): void {
     this._zoneId = (ev.target as HTMLSelectElement).value;
-    this._selectedVertex = undefined;
-    this._text = undefined;
+    this._selectVertex(undefined);
   }
 
   static override styles = css`
     .toolbar {
       display: flex;
-      justify-content: space-between;
-      align-items: flex-end;
-      gap: 12px;
-      margin: 12px 0 8px;
-    }
-    .toolbar {
       justify-content: flex-end;
-    }
-    details.advanced section + section {
-      margin-top: 16px;
-    }
-    details.advanced h3 {
       margin: 12px 0 8px;
+    }
+    h3 {
+      margin: 16px 0 4px;
       font-size: 1em;
       font-weight: 500;
     }
+    .targets ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 16px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      font-variant-numeric: tabular-nums;
+    }
+    .targets .none {
+      margin: 0;
+      color: var(--secondary-text-color);
+    }
+    details.edit > summary,
+    details.grid > summary {
+      margin-bottom: 8px;
+    }
+    .point {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .point-name {
+      flex: 1 1 100%;
+      font-weight: 500;
+    }
+    .point label {
+      flex: 1 1 100px;
+    }
+    .point input {
+      padding: 4px 8px;
+      font: inherit;
+      color: var(--primary-text-color);
+      background: var(--card-background-color);
+      border: 1px solid var(--divider-color);
+      border-radius: 4px;
+      min-width: 0;
+    }
+    label.snap-points {
+      margin-bottom: 8px;
+    }
+    .trail {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 16px;
+      margin-bottom: 12px;
+    }
+    .trail .fit-trail {
+      flex: 1 1 100%;
+      margin-top: 0;
+    }
+    button.link {
+      padding: 0;
+      font: inherit;
+      color: var(--primary-color);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+    }
+    button.link:disabled {
+      color: var(--disabled-text-color, #bdbdbd);
+      cursor: default;
+    }
+    details.grid ld2450-mount-editor {
+      margin-top: 16px;
+    }
     label.snap-step {
       max-width: 160px;
+      margin-top: 8px;
     }
     label.snap-step input {
       padding: 4px 8px;
@@ -1040,9 +1176,6 @@ export class Ld2450ZoneCard extends LitElement {
     .empty {
       color: var(--secondary-text-color);
     }
-    .editor {
-      margin-top: 12px;
-    }
     .fit-trail {
       display: flex;
       flex-wrap: wrap;
@@ -1111,29 +1244,6 @@ export class Ld2450ZoneCard extends LitElement {
       flex: 0 0 auto;
       font-size: 1em;
       color: var(--primary-text-color);
-    }
-    textarea {
-      box-sizing: border-box;
-      width: 100%;
-      padding: 8px;
-      font-family: var(--code-font-family, monospace);
-      font-size: 0.95em;
-      color: var(--primary-text-color);
-      background: var(--card-background-color);
-      border: 1px solid var(--divider-color);
-      border-radius: 4px;
-      resize: vertical;
-    }
-    .device-value {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 8px;
-      margin-top: 8px;
-      font-size: 0.85em;
-      color: var(--secondary-text-color);
-    }
-    .device-value code {
-      overflow-wrap: anywhere;
     }
     .status {
       display: flex;

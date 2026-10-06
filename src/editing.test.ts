@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clipToRect, distance, distanceToSegment, insertionIndex, insidePolygon, perimeter, snap } from "./geometry";
 import { checkPolygon, formatPolygon } from "./polygon";
-import { formatRoomText, parseRoomText } from "./polygon-text";
 
 const square = [
   { x: 0, y: 0 },
@@ -50,26 +49,6 @@ describe("checkPolygon", () => {
 
   it("checks the rounded values, as sent", () => {
     expect(checkPolygon([...square.slice(0, 3), { x: 4860.4, y: -0.4 }]).outside).toEqual([]);
-  });
-});
-
-describe("room text", () => {
-  it("formats mm and inches", () => {
-    expect(formatRoomText([{ x: -782.4, y: 1713 }], "metric")).toBe("-782,1713");
-    expect(formatRoomText([{ x: 254, y: -0.01 }], "imperial")).toBe("10,0");
-  });
-
-  it("parses mm and inches", () => {
-    expect(parseRoomText(" -782, 1713 ; 0,0;", "metric")).toEqual([
-      { x: -782, y: 1713 },
-      { x: 0, y: 0 },
-    ]);
-    expect(parseRoomText("10,-2.5", "imperial")).toEqual([{ x: 254, y: -63.5 }]);
-    expect(parseRoomText("  ", "metric")).toEqual([]);
-  });
-
-  it.each(["1,2;3", "a,b", "1,2,3", "1,,2", "1,2;;3,4"])("explains what's wrong in %s", (text) => {
-    expect(parseRoomText(text, "metric")).toMatch(/^Point \d+/);
   });
 });
 

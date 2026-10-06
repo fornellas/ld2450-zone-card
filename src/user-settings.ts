@@ -11,6 +11,8 @@ export interface UserSettings {
   units?: Units;
   /** Snap edited points to the grid. */
   snap?: boolean;
+  /** Snap edited points onto nearby points of the floor plan and other zones. */
+  snapToPoints?: boolean;
   /** Which helper outlines the map shows. All are shown until turned off. */
   overlays?: Partial<Record<Overlay, boolean>>;
   /** Margin around the trail when fitting a zone to it, for each unit system, in mm. */

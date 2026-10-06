@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { HomeAssistant } from "./ha-types";
 import "./ld2450-zone-card";
 import { Ld2450ZoneCard } from "./ld2450-zone-card";
-import { POLYGON_PATTERN } from "./polygon";
+import { POLYGON_PATTERN, formatPolygon, type Point } from "./polygon";
 
 let calls: { type: string; [key: string]: unknown }[] = [];
 let systemData: unknown = null;
@@ -64,6 +64,24 @@ function hass(): HomeAssistant {
   };
 }
 
+/** The polygon the card is editing, as it would be written to the device. */
+function drawn(root: ShadowRoot): string {
+  return formatPolygon((root.querySelector("ld2450-zone-map") as unknown as { draft: Point[] }).draft);
+}
+
+/** Points from "x,y;x,y" text. */
+function points(text: string): Point[] {
+  return text === "" ? [] : text.split(";").map((p) => ({ x: Number(p.split(",")[0]), y: Number(p.split(",")[1]) }));
+}
+
+/** Edit the polygon from the map, as dragging or clicking does. */
+async function draw(root: ShadowRoot, text: string, gesture?: string): Promise<void> {
+  root
+    .querySelector("ld2450-zone-map")!
+    .dispatchEvent(new CustomEvent("draft-changed", { detail: { points: points(text), gesture } }));
+  await (root.host as Ld2450ZoneCard).updateComplete;
+}
+
 async function renderCard(config: Record<string, unknown>, h: HomeAssistant): Promise<ShadowRoot> {
   const card = document.createElement("ld2450-zone-card") as Ld2450ZoneCard;
   card.setConfig({ type: "custom:ld2450-zone-card", ...config });
@@ -113,7 +131,7 @@ describe("ld2450-zone-card", () => {
     expect(zones[0].getAttribute("class")).toContain("selected");
     expect(zones[0].getAttribute("class")).toContain("occupied");
     expect(zones[0].textContent).toContain("Couch Zone");
-    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("x -0.78 m, y 1.71 m");
+    expect(root.querySelector(".targets")!.textContent).toContain("x -0.78 m, y 1.71 m");
 
     const imperial = [...root.querySelectorAll(".segmented button")].find((b) => b.textContent?.includes("Imperial"));
     (imperial as HTMLButtonElement).click();
@@ -138,7 +156,7 @@ describe("ld2450-zone-card", () => {
     expect(map.mount).toEqual({ invertX: true, rotation: 0, offset: { x: 0, y: 0 } });
     // Inverting mirrors the radar's x
     await map.updateComplete;
-    expect((map as unknown as HTMLElement).shadowRoot!.querySelector(".readout")!.textContent).toContain("x 0.78 m");
+    expect(root.querySelector(".targets")!.textContent).toContain("x 0.78 m");
 
     const mount = { invertX: false, rotation: 45, offset: { x: 1000, y: 0 } };
     root.querySelector("ld2450-mount-editor")!.dispatchEvent(new CustomEvent("mount-changed", { detail: mount }));
@@ -164,43 +182,29 @@ describe("ld2450-zone-card", () => {
       const update = async () => {
         await card.updateComplete;
       };
-      const textarea = () => root.querySelector("textarea")!;
-      const deviceValue = () => root.querySelector(".device-value code")!.textContent;
+      const deviceValue = () => drawn(root);
       const button = (label: string) =>
         [...root.querySelectorAll(".edit-toolbar button")].find((b) =>
           b.textContent!.includes(label),
         ) as HTMLButtonElement;
-      const type = async (value: string) => {
-        textarea().value = value;
-        textarea().dispatchEvent(new Event("input"));
-        await update();
-      };
-      return { root, update, textarea, deviceValue, button, type };
+      const type = (value: string) => draw(root, value);
+      return { root, update, deviceValue, button, type };
     }
 
     it("starts from the device's polygon", async () => {
-      const { textarea, deviceValue, root, button } = await edit();
-      expect(textarea().value).toBe("0,0;1000,0;1000,600");
+      const { deviceValue, root, button } = await edit();
       expect(deviceValue()).toBe("0,0;1000,0;1000,600");
       expect(root.querySelector(".dirty")).toBeNull();
       expect(button("Revert").disabled).toBe(true);
     });
 
-    it("edits the polygon from the text", async () => {
+    it("edits the polygon from the map", async () => {
       const { type, deviceValue, root, button } = await edit();
       await type("0,0;2000,0;2000,600;0,600");
       expect(deviceValue()).toBe("0,0;2000,0;2000,600;0,600");
       expect(root.querySelector(".dirty")).not.toBeNull();
       expect(root.querySelector(".status")!.textContent).toContain("4 / 23 points");
       expect(button("Revert").disabled).toBe(false);
-    });
-
-    it("explains text it can't read and keeps the last polygon", async () => {
-      const { type, deviceValue, root, textarea } = await edit();
-      await type("0,0;2000,0;2000");
-      expect(textarea().value).toBe("0,0;2000,0;2000");
-      expect(root.querySelector(".errors")!.textContent).toContain("Point 3");
-      expect(deviceValue()).toBe("0,0;1000,0;1000,600");
     });
 
     it("flags points outside the limits", async () => {
@@ -210,11 +214,10 @@ describe("ld2450-zone-card", () => {
     });
 
     it("clears and reverts", async () => {
-      const { button, update, deviceValue, textarea } = await edit();
+      const { button, update, deviceValue } = await edit();
       button("Clear").click();
       await update();
-      expect(deviceValue()).toBe("(empty: zone disabled)");
-      expect(textarea().value).toBe("");
+      expect(deviceValue()).toBe("");
       button("Revert").click();
       await update();
       expect(deviceValue()).toBe("0,0;1000,0;1000,600");
@@ -293,10 +296,10 @@ describe("ld2450-zone-card", () => {
         expect(deviceValue()).toBe("0,0;500,0;500,500");
       });
 
-      it("leaves Ctrl+Z in the points text to the text", async () => {
-        const { change, key, deviceValue, textarea } = await undoable();
+      it("leaves Ctrl+Z in text fields to the field", async () => {
+        const { change, key, deviceValue, root } = await undoable();
         await change(square(500));
-        await key("z", false, textarea());
+        await key("z", false, root.querySelector(".point input")!);
         expect(deviceValue()).toBe("0,0;500,0;500,500");
       });
 
@@ -379,9 +382,21 @@ describe("ld2450-zone-card", () => {
       const h = hass();
       systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
       const root = await renderCard({}, h);
+      const card = root.host as Ld2450ZoneCard;
+      const map = root.querySelector("ld2450-zone-map")!;
+      const inputs = () => [...root.querySelectorAll<HTMLInputElement>(".point input")];
+      expect(root.querySelector(".point-name")!.textContent).toBe("No point selected");
+      expect(inputs().every((i) => i.disabled)).toBe(true);
       // Radar (1000,0) -> inverted (-1000,0) -> offset (0,0)
-      expect(root.querySelector("textarea")!.value).toBe("1000,0;0,0;0,600");
-      expect(root.querySelector(".device-value code")!.textContent).toBe("0,0;1000,0;1000,600");
+      map.dispatchEvent(new CustomEvent("vertex-selected", { detail: 1 }));
+      await card.updateComplete;
+      expect(root.querySelector(".point-name")!.textContent).toBe("Point 2");
+      expect(inputs().map((i) => i.value)).toEqual(["0", "0"]);
+      // Typing room coordinates moves the point, in radar coordinates
+      inputs()[1].value = "0.5";
+      inputs()[1].dispatchEvent(new Event("input"));
+      await card.updateComplete;
+      expect(drawn(root)).toBe("0,0;1000,500;1000,600");
     });
   });
 
@@ -395,12 +410,9 @@ describe("ld2450-zone-card", () => {
     expect(root.querySelector(".offline")!.textContent).toContain("Office is offline");
     const map = root.querySelector("ld2450-zone-map")!;
     await (map as unknown as { updateComplete: Promise<unknown> }).updateComplete;
-    expect(map.shadowRoot!.querySelector(".readout")!.textContent).toContain("Radar offline");
+    expect(root.querySelector(".targets")!.textContent).toContain("Radar offline");
     // Edits are possible, but can't be saved
-    const textarea = root.querySelector("textarea")!;
-    textarea.value = "0,0;1000,0;1000,600";
-    textarea.dispatchEvent(new Event("input"));
-    await (root.host as Ld2450ZoneCard).updateComplete;
+    await draw(root, "0,0;1000,0;1000,600");
     const save = [...root.querySelectorAll(".edit-toolbar button")].find((b) => b.textContent!.includes("Save"));
     expect((save as HTMLButtonElement).disabled).toBe(true);
   });
@@ -430,10 +442,8 @@ describe("ld2450-zone-card", () => {
       select.value = "floor-plan";
       select.dispatchEvent(new Event("change"));
       await card.updateComplete;
-      const textarea = root.querySelector("textarea")!;
-      textarea.value = "-3000,-500;3000,-500;3000,6000;-3000,6000";
-      textarea.dispatchEvent(new Event("input"));
-      await card.updateComplete;
+      // Drawn on the map; the radar coordinates of room (-3000,-500) etc., with the radar at (1000,0) and inverted
+      await draw(root, "4000,-500;-2000,-500;-2000,6000;4000,6000");
       const save = [...root.querySelectorAll(".edit-toolbar button")].find((b) =>
         b.textContent!.includes("Save"),
       ) as HTMLButtonElement;
@@ -444,8 +454,6 @@ describe("ld2450-zone-card", () => {
       const h = hass();
       systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
       const { root, card, save } = await editFloorPlan(h);
-      // Floor plans aren't written to the device
-      expect(root.querySelector(".device-value")).toBeNull();
       expect(root.querySelector(".status")!.textContent).toContain("4 points");
       save.click();
       await new Promise((resolve) => setTimeout(resolve));
@@ -470,7 +478,6 @@ describe("ld2450-zone-card", () => {
       });
       expect(root.querySelector(".saved")!.textContent).toContain("Floor plan saved");
       expect(root.querySelector(".dirty")).toBeNull();
-      expect(root.querySelector("textarea")!.value).toBe("-3000,-500;3000,-500;3000,6000;-3000,6000");
     });
 
     it("can only be saved by admins", async () => {
@@ -496,7 +503,7 @@ describe("ld2450-zone-card", () => {
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
     const toggles = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle input")];
-    expect(toggles).toHaveLength(4);
+    expect(toggles).toHaveLength(3);
     toggles[2].checked = false;
     toggles[2].dispatchEvent(new Event("change"));
     await (root.host as Ld2450ZoneCard).updateComplete;
@@ -530,9 +537,7 @@ describe("ld2450-zone-card", () => {
         await update();
       };
       const toggle = async (on: boolean) => {
-        const input = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle")]
-          .find((l) => l.textContent!.includes("Trail"))!
-          .querySelector("input")!;
+        const input = root.querySelector<HTMLInputElement>(".trail input")!;
         input.checked = on;
         input.dispatchEvent(new Event("change"));
         await update();
@@ -553,7 +558,7 @@ describe("ld2450-zone-card", () => {
       expect(margin.value).toBe("0.3");
       button("Fit zone to trail").click();
       await update();
-      const value = root.querySelector(".device-value code")!.textContent!;
+      const value = drawn(root);
       const points = value.split(";").map((p) => p.split(",").map(Number));
       expect(points.length).toBeGreaterThanOrEqual(3);
       expect(points.length).toBeLessThanOrEqual(16);
@@ -562,7 +567,7 @@ describe("ld2450-zone-card", () => {
       expect(Math.max(...points.map(([, y]) => y))).toBeGreaterThanOrEqual(2300);
       button("Undo").click();
       await update();
-      expect(root.querySelector(".device-value code")!.textContent).toBe("0,0;1000,0;1000,600");
+      expect(drawn(root)).toBe("0,0;1000,0;1000,600");
     });
 
     it("isn't offered for the floor plan", async () => {
@@ -595,10 +600,10 @@ describe("ld2450-zone-card", () => {
     });
 
     it("clears with the button, and when turned off", async () => {
-      const { map, circles, move, toggle, update } = await withTrail();
+      const { root, circles, move, toggle, update } = await withTrail();
       await toggle(true);
       await move(100, 1000);
-      (map.shadowRoot!.querySelector("button.link") as HTMLButtonElement).click();
+      (root.querySelector(".trail button.link") as HTMLButtonElement).click();
       await update();
       expect(circles()).toBe(0);
       await move(200, 1000);
@@ -608,6 +613,47 @@ describe("ld2450-zone-card", () => {
       // Turned on again, it starts afresh from where the target is now
       await toggle(true);
       expect(circles()).toBe(1);
+    });
+  });
+
+  it("lays out targets, edit, grid and entities", async () => {
+    const root = await renderCard({}, hass());
+    const sections = [...root.querySelectorAll(".card-content > section, .card-content > details")].map((el) =>
+      el.querySelector("h3, summary")!.textContent!.trim(),
+    );
+    expect(sections).toEqual(["Targets", "Edit", "Grid", "Entities"]);
+    expect((root.querySelector("details.edit") as HTMLDetailsElement).open).toBe(true);
+    expect((root.querySelector("details.grid") as HTMLDetailsElement).open).toBe(false);
+    const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & { updateComplete: Promise<unknown> };
+    await map.updateComplete;
+    expect(
+      [...map.shadowRoot!.querySelectorAll(".legend > *")].map((el) => el.textContent!.replace(/\s+/g, " ").trim()),
+    ).toEqual(["Tracking range", "Zone point limits", "Floor plan", "Selected zone", "Occupied", "Targets"]);
+  });
+
+  it("shows the snap step only while snapping to the grid", async () => {
+    const root = await renderCard({}, hass());
+    expect(root.querySelector(".snap-step")).not.toBeNull();
+    const snap = root.querySelector<HTMLInputElement>("details.grid label.check input")!;
+    snap.checked = false;
+    snap.dispatchEvent(new Event("change"));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    expect(root.querySelector(".snap-step")).toBeNull();
+  });
+
+  it("snaps to nearby points unless turned off, per user", async () => {
+    const root = await renderCard({}, hass());
+    const map = root.querySelector("ld2450-zone-map") as unknown as { snapToPoints: boolean };
+    expect(map.snapToPoints).toBe(true);
+    const box = root.querySelector<HTMLInputElement>(".snap-points input")!;
+    box.checked = false;
+    box.dispatchEvent(new Event("change"));
+    await (root.host as Ld2450ZoneCard).updateComplete;
+    expect(map.snapToPoints).toBe(false);
+    expect(calls).toContainEqual({
+      type: "frontend/set_user_data",
+      key: "ld2450_zone_card",
+      value: { snapToPoints: false },
     });
   });
 

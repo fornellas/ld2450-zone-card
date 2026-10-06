@@ -40,7 +40,7 @@ export class Ld2450MountEditor extends LitElement {
           ?disabled=${this.disabled}
           @change=${(ev: Event) => this._change({ invertX: (ev.target as HTMLInputElement).checked })}
         />
-        Invert X <span class="hint">(mirror left and right)</span>
+        Mirror X
       </label>
       <div class="row">
         ${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}
@@ -112,6 +112,9 @@ export class Ld2450MountEditor extends LitElement {
   }
 
   static override styles = css`
+    :host {
+      display: block;
+    }
     .row {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
