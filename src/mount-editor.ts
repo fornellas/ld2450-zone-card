@@ -33,19 +33,19 @@ export class Ld2450MountEditor extends LitElement {
     const step = this.units === "metric" ? 0.01 : 0.1;
     const maxOffset = toInputValue(MAX_OFFSET, this.units);
     return html`
-      <label class="check" title="Mirror left and right, for example when the radar is mounted upside down">
+      <label class="check" title="Mirrors left and right, as mounting the radar upside down does">
         <input
           type="checkbox"
           .checked=${this.mount.invertX}
           ?disabled=${this.disabled}
           @change=${(ev: Event) => this._change({ invertX: (ev.target as HTMLInputElement).checked })}
         />
-        Mirror X
+        Upside down
       </label>
       <div class="row">${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}</div>
       <div class="row">
-        ${this._renderNumber("x", `Radar X (${unit})`, -maxOffset, maxOffset, step)}
-        ${this._renderNumber("y", `Radar Y (${unit})`, -maxOffset, maxOffset, step)}
+        ${this._renderNumber("x", `X (${unit})`, -maxOffset, maxOffset, step)}
+        ${this._renderNumber("y", `Y (${unit})`, -maxOffset, maxOffset, step)}
       </div>
       ${this.disabled ? html`<p class="note">Only administrators can change the radar position.</p>` : nothing}
     `;

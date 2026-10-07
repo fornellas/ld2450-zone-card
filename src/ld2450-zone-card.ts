@@ -388,6 +388,7 @@ export class Ld2450ZoneCard extends LitElement {
               : nothing
           }
         </div>
+        <h4>Radar</h4>
         <ld2450-mount-editor
           .mount=${mount}
           .units=${this._units}
@@ -1114,8 +1115,10 @@ export class Ld2450ZoneCard extends LitElement {
     label.snap-points {
       margin-bottom: 8px;
     }
-    details.grid ld2450-mount-editor {
-      margin-top: 16px;
+    details.grid h4 {
+      margin: 16px 0 8px;
+      font-size: 0.95em;
+      font-weight: 500;
     }
     label.snap-step input {
       padding: 4px 8px;
