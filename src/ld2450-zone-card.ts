@@ -415,7 +415,6 @@ export class Ld2450ZoneCard extends LitElement {
   private _renderTargetPositions(targets: TargetPosition[], mount: Mount, offline: boolean) {
     return html`
       <section class="targets">
-        <h3>Targets</h3>
         ${
           targets.length === 0
             ? html`<p class="none">${offline ? "Radar offline" : "No targets tracked"}</p>`
@@ -1161,6 +1160,29 @@ export class Ld2450ZoneCard extends LitElement {
     summary {
       cursor: pointer;
       color: var(--secondary-text-color);
+      list-style: none;
+    }
+    summary::-webkit-details-marker {
+      display: none;
+    }
+    /* Draw the arrow at a fixed width, and indent the section's content by the same width, so it's clear what's
+       inside */
+    summary::before {
+      content: "▸";
+      display: inline-block;
+      width: var(--section-indent);
+    }
+    details[open] > summary::before {
+      content: "▾";
+    }
+    details {
+      padding-left: var(--section-indent);
+    }
+    details > summary {
+      margin-left: calc(-1 * var(--section-indent));
+    }
+    :host {
+      --section-indent: 1.25em;
     }
     .selectors {
       display: flex;

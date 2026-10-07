@@ -42,8 +42,8 @@ export class Ld2450MountEditor extends LitElement {
         />
         Upside down
       </label>
-      <div class="row">${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}</div>
       <div class="row">
+        ${this._renderNumber("rotation", "Rotation (° CCW)", -180, 180, 1)}
         ${this._renderNumber("x", `X (${unit})`, -maxOffset, maxOffset, step)}
         ${this._renderNumber("y", `Y (${unit})`, -maxOffset, maxOffset, step)}
       </div>

@@ -619,9 +619,11 @@ describe("ld2450-zone-card", () => {
   it("lays out targets, edit, grid and entities", async () => {
     const root = await renderCard({}, hass());
     const sections = [...root.querySelectorAll(".card-content > section, .card-content > details")].map((el) =>
-      el.querySelector("h3, summary")!.textContent!.trim(),
+      el.tagName === "SECTION" ? el.className : el.querySelector("summary")!.textContent!.trim(),
     );
-    expect(sections).toEqual(["Targets", "Edit", "Grid", "Entities"]);
+    expect(sections).toEqual(["targets", "Edit", "Grid", "Entities"]);
+    // The targets go straight under the map, without a heading
+    expect(root.querySelector(".targets h3")).toBeNull();
     expect((root.querySelector("details.edit") as HTMLDetailsElement).open).toBe(true);
     expect((root.querySelector("details.grid") as HTMLDetailsElement).open).toBe(false);
     const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & { updateComplete: Promise<unknown> };
