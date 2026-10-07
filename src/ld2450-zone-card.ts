@@ -58,8 +58,9 @@ type Target = { kind: "zone"; key: string; zone: Zone } | { kind: "floorPlan"; k
 
 // Most undo steps kept for each polygon
 const MAX_UNDO = 100;
-// Most target positions kept in the trail of each device
-const MAX_TRAIL = 1000;
+// Most target positions kept in the trail of each device. Each is an SVG circle, repainted whenever the map changes:
+// measured, 5k-10k keeps redraws around a frame or two on phones, while memory stays a few MB
+const MAX_TRAIL = 7000;
 
 /** Drafts before (undo) and after (redo) each change; undefined is "no draft", i.e. what's saved. */
 interface History {
