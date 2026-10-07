@@ -684,8 +684,8 @@ export class Ld2450ZoneMap extends LitElement {
       margin: 0 4px 0 0;
     }
     .swatch.floor-plan {
-      height: 0;
-      border-top: 2.5px solid var(--primary-text-color);
+      box-sizing: border-box;
+      border: 2px solid var(--primary-text-color);
     }
     .swatch.target {
       width: 10px;
