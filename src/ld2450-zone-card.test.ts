@@ -203,7 +203,6 @@ describe("ld2450-zone-card", () => {
       await type("0,0;2000,0;2000,600;0,600");
       expect(deviceValue()).toBe("0,0;2000,0;2000,600;0,600");
       expect(root.querySelector(".dirty")).not.toBeNull();
-      expect(root.querySelector(".status")!.textContent).toContain("4 / 23 points");
       expect(button("Revert").disabled).toBe(false);
     });
 
@@ -454,7 +453,6 @@ describe("ld2450-zone-card", () => {
       const h = hass();
       systemData = { mounts: { dev1: { invertX: true, rotation: 0, offset: { x: 1000, y: 0 } } } };
       const { root, card, save } = await editFloorPlan(h);
-      expect(root.querySelector(".status")!.textContent).toContain("4 points");
       save.click();
       await new Promise((resolve) => setTimeout(resolve));
       await card.updateComplete;

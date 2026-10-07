@@ -546,10 +546,7 @@ export class Ld2450ZoneCard extends LitElement {
             : html`<p class=${result.ok ? "saved" : "error"} role="status">${result.message}</p>`
         }
         ${cantSave === undefined ? nothing : html`<p class="error">${cantSave}</p>`}
-        <div class="status">
-          <span>${isZone ? `${points.length} / ${maxPoints} points` : `${points.length} points`}</span>
-          ${editing.dirty ? html`<span class="dirty">Unsaved changes</span>` : nothing}
-        </div>
+        ${editing.dirty ? html`<div class="status"><span class="dirty">Unsaved changes</span></div>` : nothing}
         ${
           check.errors.length === 0
             ? nothing
