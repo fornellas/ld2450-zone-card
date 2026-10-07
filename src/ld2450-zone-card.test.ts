@@ -559,7 +559,7 @@ describe("ld2450-zone-card", () => {
       const value = drawn(root);
       const points = value.split(";").map((p) => p.split(",").map(Number));
       expect(points.length).toBeGreaterThanOrEqual(3);
-      expect(points.length).toBeLessThanOrEqual(16);
+      expect(points.length).toBeLessThanOrEqual(23);
       // At least the margin beyond the trail: the trail spans x 0..1000 and y 1000..2000
       expect(Math.min(...points.map(([x]) => x))).toBeLessThanOrEqual(-300);
       expect(Math.max(...points.map(([, y]) => y))).toBeGreaterThanOrEqual(2300);

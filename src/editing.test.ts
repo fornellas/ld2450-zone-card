@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { clipToRect, distance, distanceToSegment, insertionIndex, insidePolygon, perimeter, snap } from "./geometry";
+import {
+  MAX_PERIMETER_POINTS,
+  clipToRect,
+  distance,
+  distanceToSegment,
+  insertionIndex,
+  insidePolygon,
+  perimeter,
+  snap,
+} from "./geometry";
 import { checkPolygon, formatPolygon } from "./polygon";
 
 const square = [
@@ -84,9 +93,9 @@ describe("perimeter", () => {
     { x: 400, y: 1300 },
   ];
 
-  it("keeps every point at least the margin inside, with at most 16 points", () => {
+  it("keeps every point at least the margin inside, with at most 19 points", () => {
     const polygon = perimeter(trail, 300);
-    expect(polygon.length).toBeLessThanOrEqual(16);
+    expect(polygon.length).toBeLessThanOrEqual(MAX_PERIMETER_POINTS);
     for (const p of trail) {
       expect(insidePolygon(p, polygon)).toBe(true);
       for (let i = 0; i < polygon.length; i++) {
@@ -98,7 +107,7 @@ describe("perimeter", () => {
   it("surrounds a single point", () => {
     const polygon = perimeter([{ x: 0, y: 1000 }], 200);
     // Its 16 edges would be about 80 mm, so some are left out
-    expect(polygon.length).toBeLessThan(16);
+    expect(polygon.length).toBeLessThanOrEqual(MAX_PERIMETER_POINTS);
     expect(polygon.length).toBeGreaterThanOrEqual(4);
     expect(insidePolygon({ x: 0, y: 1000 }, polygon)).toBe(true);
   });
@@ -106,8 +115,18 @@ describe("perimeter", () => {
   it("leaves out very short edges", () => {
     const polygon = perimeter(trail, 300);
     for (let i = 0; i < polygon.length; i++) {
-      expect(distance(polygon[i], polygon[(i + 1) % polygon.length])).toBeGreaterThanOrEqual(300);
+      expect(distance(polygon[i], polygon[(i + 1) % polygon.length])).toBeGreaterThanOrEqual(150);
     }
+  });
+
+  it("keeps a large round trail within the point limit, still around every point", () => {
+    const circle = Array.from({ length: 200 }, (_, i) => ({
+      x: 3000 * Math.cos((2 * Math.PI * i) / 200),
+      y: 4000 + 3000 * Math.sin((2 * Math.PI * i) / 200),
+    }));
+    const polygon = perimeter(circle, 100);
+    expect(polygon.length).toBeLessThanOrEqual(MAX_PERIMETER_POINTS);
+    for (const p of circle) expect(insidePolygon(p, polygon)).toBe(true);
   });
 
   it("is empty without points", () => {

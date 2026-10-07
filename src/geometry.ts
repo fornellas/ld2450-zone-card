@@ -48,15 +48,18 @@ export function insidePolygon(p: Point, polygon: Point[], tolerance = 1): boolea
   return inside;
 }
 
-// Edge directions of the perimeter: every 22.5°, so it has at most 16 sides, well under the device's 23 points
-const PERIMETER_DIRECTIONS = 16;
+// Edge directions of the perimeter: every 11.25°
+const PERIMETER_DIRECTIONS = 32;
 // Perimeter edges shorter than this, in mm, are dropped, so points don't bunch up
-const MIN_PERIMETER_EDGE = 300;
+const MIN_PERIMETER_EDGE = 150;
+// Most points a perimeter has: the device takes 23, and clipping it to a rectangle can add up to 4
+export const MAX_PERIMETER_POINTS = 19;
 
 /**
  * A convex polygon around the points, keeping every point at least margin inside it. Its edges point in fixed
- * directions, every 22.5°, each as close as the margin allows; edges that would be very short are left out, which
- * only makes the polygon bigger. Its vertices go counter-clockwise.
+ * directions, every 11.25°, each as close as the margin allows. Edges that would be very short are left out, and so
+ * are the shortest ones while there are more than MAX_PERIMETER_POINTS; leaving edges out only makes the polygon
+ * bigger. Its vertices go counter-clockwise.
  */
 export function perimeter(points: Point[], margin: number): Point[] {
   if (points.length === 0) return [];
@@ -78,7 +81,8 @@ export function perimeter(points: Point[], margin: number): Point[] {
   for (;;) {
     const v = vertices();
     let shortest = -1;
-    let shortestLength = MIN_PERIMETER_EDGE;
+    // Too many points: leave out the shortest edge, however long
+    let shortestLength = edges.length > MAX_PERIMETER_POINTS ? Number.POSITIVE_INFINITY : MIN_PERIMETER_EDGE;
     edges.forEach((_, i) => {
       const previous = edges[(i + edges.length - 1) % edges.length];
       const next = edges[(i + 1) % edges.length];
