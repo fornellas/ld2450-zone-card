@@ -670,7 +670,8 @@ export class Ld2450ZoneMap extends LitElement {
       border: 1.5px solid color-mix(in srgb, var(--primary-color) 45%, transparent);
     }
     .floor-plan {
-      fill: none;
+      fill: var(--primary-text-color);
+      fill-opacity: 0.05;
       stroke: var(--primary-text-color);
       stroke-width: 2.5;
       stroke-linejoin: round;
@@ -685,6 +686,7 @@ export class Ld2450ZoneMap extends LitElement {
     }
     .swatch.floor-plan {
       box-sizing: border-box;
+      background: color-mix(in srgb, var(--primary-text-color) 5%, transparent);
       border: 2px solid var(--primary-text-color);
     }
     .swatch.target {
