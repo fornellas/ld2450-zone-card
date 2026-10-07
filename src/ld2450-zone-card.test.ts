@@ -385,7 +385,7 @@ describe("ld2450-zone-card", () => {
       const card = root.host as Ld2450ZoneCard;
       const map = root.querySelector("ld2450-zone-map")!;
       const inputs = () => [...root.querySelectorAll<HTMLInputElement>(".point input")];
-      expect(root.querySelector(".point-name")!.textContent).toBe("No point selected");
+      expect(root.querySelector(".point-name")!.textContent).toBe("Point (none selected)");
       expect(inputs().every((i) => i.disabled)).toBe(true);
       // Radar (1000,0) -> inverted (-1000,0) -> offset (0,0)
       map.dispatchEvent(new CustomEvent("vertex-selected", { detail: 1 }));

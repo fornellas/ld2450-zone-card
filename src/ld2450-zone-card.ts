@@ -503,7 +503,6 @@ export class Ld2450ZoneCard extends LitElement {
           }
           Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
-        ${this._renderSelectedPoint(target, mount, editing)}
         <label class="check snap-points">
           <input
             type="checkbox"
@@ -512,7 +511,7 @@ export class Ld2450ZoneCard extends LitElement {
           />
           Snap to nearby points
         </label>
-        ${this._renderTrail(target, mount, trail)}
+        ${this._renderTrail(target, mount, trail)} ${this._renderSelectedPoint(target, mount, editing)}
         <div class="edit-toolbar">
           <button
             title="Undo (Ctrl+Z)"
@@ -575,8 +574,8 @@ export class Ld2450ZoneCard extends LitElement {
     const point = index === undefined ? undefined : editing.roomPoints[index];
     const unit = inputUnit(this._units);
     return html`
+      <h4 class="point-name">${point === undefined ? "Point (none selected)" : `Point ${index! + 1}`}</h4>
       <div class="point">
-        <span class="point-name">${point === undefined ? "No point selected" : `Point ${index! + 1}`}</span>
         ${(["x", "y"] as const).map(
           (axis) => html`
             <label class="inline">
@@ -1114,6 +1113,7 @@ export class Ld2450ZoneCard extends LitElement {
     label.snap-points {
       margin-bottom: 8px;
     }
+    details.edit h4,
     details.grid h4 {
       margin: 16px 0 8px;
       font-size: 0.95em;
