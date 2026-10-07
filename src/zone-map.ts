@@ -29,6 +29,8 @@ const RADAR_DEPTH = 150;
 const HEADING_LENGTH = 700;
 // Smallest area the map shows, in mm, so a lone small zone doesn't fill it
 const MIN_MAP_SIZE = 2000;
+// Room kept around targets and trail points when fitting the map, in mm, for the circles drawn around them
+const TARGET_PADDING = 300;
 // Pointer movement, in screen pixels, before pressing a point becomes dragging it
 const DRAG_THRESHOLD_PX = 4;
 // Smallest radius around a point that grabs it, in screen pixels, so fingers can hit it
@@ -46,12 +48,15 @@ interface Extent {
 }
 
 function extentOf(points: Point[]): Extent {
-  return {
-    minX: Math.min(...points.map((p) => p.x)),
-    maxX: Math.max(...points.map((p) => p.x)),
-    minY: Math.min(...points.map((p) => p.y)),
-    maxY: Math.max(...points.map((p) => p.y)),
-  };
+  // A loop rather than Math.min(...), which can't take thousands of trail points as arguments
+  const e = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+  for (const p of points) {
+    e.minX = Math.min(e.minX, p.x);
+    e.maxX = Math.max(e.maxX, p.x);
+    e.minY = Math.min(e.minY, p.y);
+    e.maxY = Math.max(e.maxY, p.y);
+  }
+  return e;
 }
 
 /** Grow an extent around its center to at least size wide and high. */
@@ -142,8 +147,8 @@ export class Ld2450ZoneMap extends LitElement {
     const bounds = FIRMWARE_BOUNDS.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
     const floorPlan = this.floorPlan.map((p) => toRoom(p, this.mount));
-    // Fit what's shown: the radar, the zones, and the outlines that are on. Not the polygon being edited, so the map
-    // doesn't rescale while dragging its points.
+    // Fit what's shown: the radar, the zones, the outlines that are on, the targets and the trail. Not the polygon
+    // being edited, so the map doesn't rescale while dragging its points.
     const radar = toRoom({ x: 0, y: 0 }, this.mount);
     const shown = [
       radar,
@@ -152,6 +157,15 @@ export class Ld2450ZoneMap extends LitElement {
       ...(this._shown("pointLimits") ? bounds : []),
       ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
     ];
+    // Targets and trail points are drawn as circles around their position, so leave room for them
+    const seen = [...this.targets.map((t) => t.point), ...(this.trailShown ? this.trail : [])];
+    if (seen.length > 0) {
+      const e = extentOf(seen.map((p) => toRoom(p, this.mount)));
+      shown.push(
+        { x: e.minX - TARGET_PADDING, y: e.minY - TARGET_PADDING },
+        { x: e.maxX + TARGET_PADDING, y: e.maxY + TARGET_PADDING },
+      );
+    }
     // With nothing else to show, fit the tracking range rather than a single point
     const fitted = extentOf(shown.length > 1 ? shown : [...shown, ...area]);
     const content = growTo(fitted, MIN_MAP_SIZE);

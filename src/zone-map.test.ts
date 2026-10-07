@@ -101,3 +101,43 @@ describe("ld2450-zone-map snapping", () => {
     expect(round((await map(false))({ x: 1250, y: 2330 }))).toEqual({ x: 1300, y: 2300 });
   });
 });
+
+describe("ld2450-zone-map fitting targets and trail", () => {
+  async function width(setup: (map: Ld2450ZoneMap) => void): Promise<number> {
+    const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+    map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+    // A small zone near the radar, so the map fits tightly unless something else is far away
+    map.zones = [
+      {
+        name: "Desk",
+        points: [
+          { x: 0, y: 1000 },
+          { x: 500, y: 1000 },
+          { x: 500, y: 1500 },
+        ],
+        selected: false,
+        occupied: false,
+      },
+    ];
+    setup(map);
+    document.body.appendChild(map);
+    await map.updateComplete;
+    return Number(map.shadowRoot!.querySelector("svg")!.getAttribute("viewBox")!.split(" ")[2]);
+  }
+  const far = { x: 4000, y: 6000 };
+
+  it("zooms out to keep targets in view", async () => {
+    const without = await width(() => undefined);
+    const withTarget = await width((map) => (map.targets = [{ label: "1", name: "Target 1", point: far }]));
+    expect(withTarget).toBeGreaterThan(without);
+  });
+
+  it("zooms out to keep the trail in view, while it's shown", async () => {
+    const hidden = await width((map) => (map.trail = [far]));
+    const shown = await width((map) => {
+      map.trail = [far];
+      map.trailShown = true;
+    });
+    expect(shown).toBeGreaterThan(hidden);
+  });
+});
