@@ -504,6 +504,14 @@ export class Ld2450ZoneCard extends LitElement {
           }
           Drag a point to move it. To remove a point, select it and use Delete point, or double-click it.
         </p>
+        ${
+          isZone && this._userSettings?.overlays?.selectedZone === false
+            ? html`<p class="help hidden-zone">
+                The selected zone is hidden on the map, so it can't be edited there. Tick Selected zone under the map to
+                show it.
+              </p>`
+            : nothing
+        }
         <label class="check snap-points">
           <input
             type="checkbox"

@@ -5,7 +5,7 @@ import type { Units } from "./units";
 
 const KEY = "ld2450_zone_card";
 
-export type Overlay = "trackingRange" | "pointLimits" | "floorPlan";
+export type Overlay = "trackingRange" | "pointLimits" | "floorPlan" | "selectedZone" | "occupied" | "targets";
 
 export interface UserSettings {
   units?: Units;

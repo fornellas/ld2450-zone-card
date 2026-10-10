@@ -501,7 +501,7 @@ describe("ld2450-zone-card", () => {
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
     const toggles = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle input")];
-    expect(toggles).toHaveLength(3);
+    expect(toggles).toHaveLength(6);
     toggles[2].checked = false;
     toggles[2].dispatchEvent(new Event("change"));
     await (root.host as Ld2450ZoneCard).updateComplete;
@@ -654,6 +654,41 @@ describe("ld2450-zone-card", () => {
       type: "frontend/set_user_data",
       key: "ld2450_zone_card",
       value: { snapToPoints: false },
+    });
+  });
+
+  describe("map toggles", () => {
+    async function withOverlays(overlays: Record<string, boolean>) {
+      const h = hass();
+      const callWS = h.callWS;
+      h.callWS = <T>(msg: { type: string; [key: string]: unknown }) =>
+        msg.type === "frontend/get_user_data" ? Promise.resolve({ value: { overlays } } as T) : callWS<T>(msg);
+      const root = await renderCard({}, h);
+      const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & {
+        updateComplete: Promise<unknown>;
+      };
+      await map.updateComplete;
+      return { root, shadow: map.shadowRoot! };
+    }
+
+    it("hides targets", async () => {
+      expect((await withOverlays({})).shadow.querySelectorAll("g.target")).toHaveLength(1);
+      expect((await withOverlays({ targets: false })).shadow.querySelectorAll("g.target")).toHaveLength(0);
+    });
+
+    it("stops filling occupied zones", async () => {
+      expect((await withOverlays({})).shadow.querySelector(".zone.occupied")).not.toBeNull();
+      expect((await withOverlays({ occupied: false })).shadow.querySelector(".zone.occupied")).toBeNull();
+    });
+
+    it("hides the selected zone, and doesn't edit it out of sight", async () => {
+      const shown = await withOverlays({});
+      expect(shown.shadow.querySelectorAll("g.vertex").length).toBeGreaterThan(0);
+      expect(shown.root.querySelector(".hidden-zone")).toBeNull();
+      const hidden = await withOverlays({ selectedZone: false });
+      expect(hidden.shadow.querySelectorAll("g.vertex")).toHaveLength(0);
+      expect(hidden.shadow.querySelector(".zone.selected")).toBeNull();
+      expect(hidden.root.querySelector(".hidden-zone")!.textContent).toContain("hidden on the map");
     });
   });
 

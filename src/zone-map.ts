@@ -158,7 +158,10 @@ export class Ld2450ZoneMap extends LitElement {
       ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
     ];
     // Targets and trail points are drawn as circles around their position, so leave room for them
-    const seen = [...this.targets.map((t) => t.point), ...(this.trailShown ? this.trail : [])];
+    const seen = [
+      ...(this._shown("targets") ? this.targets.map((t) => t.point) : []),
+      ...(this.trailShown ? this.trail : []),
+    ];
     if (seen.length > 0) {
       const e = extentOf(seen.map((p) => toRoom(p, this.mount)));
       shown.push(
@@ -196,8 +199,8 @@ export class Ld2450ZoneMap extends LitElement {
         role="img"
         aria-label="Radar map"
         style="--font: ${font}px"
-        class=${this.editable ? "editable" : ""}
-        tabindex=${this.editable ? "0" : "-1"}
+        class=${this._editorShown ? "editable" : ""}
+        tabindex=${this._editorShown ? "0" : "-1"}
         @click=${this._backgroundClick}
         @keydown=${this._keydown}
       >
@@ -209,18 +212,24 @@ export class Ld2450ZoneMap extends LitElement {
         }
         ${this._shown("pointLimits") ? svg`<polygon class="bounds" points=${pointsAttr(bounds)}></polygon>` : nothing}
         ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
-        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTrail(font)} ${this._renderTargets(font)}
-        ${this.editable ? this._renderEditor(font) : nothing}
+        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTrail(font)}
+        ${this._shown("targets") ? this._renderTargets(font) : nothing}
+        ${this._editorShown ? this._renderEditor(font) : nothing}
       </svg>
       <div class="legend">
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
         ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
         ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
-        <span><i class="swatch zone"></i>Selected zone</span>
-        <span><i class="swatch occupied"></i>Occupied</span>
-        <span><i class="swatch target"></i>Targets</span>
+        ${this._renderToggle("selectedZone", "zone", "Selected zone")}
+        ${this._renderToggle("occupied", "occupied", "Occupied")} ${this._renderToggle("targets", "target", "Targets")}
       </div>
     `;
+  }
+
+  /** The polygon being edited is drawn, with handles to edit it. Hiding the selected zone hides it, so a zone isn't
+   * edited out of sight; the floor plan is always shown while it's edited. */
+  private get _editorShown(): boolean {
+    return this.editable && (this.editingFloorPlan || this._shown("selectedZone"));
   }
 
   private _shown(overlay: Overlay): boolean {
@@ -304,12 +313,13 @@ export class Ld2450ZoneMap extends LitElement {
   private _renderZones(font: number) {
     // The selected zone goes last, so it's drawn on top. While editing, the editor draws it.
     const zones = [...this.zones]
-      .filter((z) => !(this.editable && z.selected))
+      .filter((z) => !(z.selected && (this.editable || !this._shown("selectedZone"))))
       .filter((z) => z.points.length > 0)
       .sort((a, b) => Number(a.selected) - Number(b.selected));
     return zones.map((zone) => {
       const points = zone.points.map((p) => toRoom(p, this.mount));
-      const classes = ["zone", zone.selected ? "selected" : "", zone.occupied ? "occupied" : ""].join(" ");
+      const occupied = zone.occupied && this._shown("occupied");
+      const classes = ["zone", zone.selected ? "selected" : "", occupied ? "occupied" : ""].join(" ");
       return svg`
         <g class=${classes}>
           <title>${zone.name}${zone.occupied ? " (occupied)" : ""}</title>
@@ -337,7 +347,7 @@ export class Ld2450ZoneMap extends LitElement {
     const selected = this.zones.find((z) => z.selected);
     const outline = this.deviceOutline?.map((p) => toRoom(p, this.mount));
     // Occupancy comes from the device's polygon: show it there, and not on changes the device doesn't have yet
-    const occupied = selected?.occupied ? "occupied" : "";
+    const occupied = selected?.occupied && this._shown("occupied") ? "occupied" : "";
     const classes = [
       "zone",
       "selected",
@@ -441,7 +451,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _backgroundClick(ev: MouseEvent): void {
-    if (!this.editable || this.draft.length >= POLYGON_MAX_POINTS) return;
+    if (!this._editorShown || this.draft.length >= POLYGON_MAX_POINTS) return;
     const room = this._roomPoint(ev);
     if (room === undefined) return;
     const roomPoints = this.draft.map((p) => toRoom(p, this.mount));
@@ -494,7 +504,7 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _keydown(ev: KeyboardEvent): void {
-    if (!this.editable) return;
+    if (!this._editorShown) return;
     if ((ev.key === "Delete" || ev.key === "Backspace") && this.selectedVertex !== undefined) {
       ev.preventDefault();
       this._deleteVertex(undefined, this.selectedVertex);
