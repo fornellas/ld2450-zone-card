@@ -236,18 +236,18 @@ export class Ld2450ZoneMap extends LitElement {
     return this.overlays[overlay] ?? true;
   }
 
-  /** A legend entry that shows or hides an outline. Fires "overlay-toggled" with { overlay, shown }. */
+  /** A legend entry that shows or hides what it names when clicked. Fires "overlay-toggled" with { overlay, shown }. */
   private _renderToggle(overlay: Overlay, swatch: string, label: string) {
+    const shown = this._shown(overlay);
     return html`
-      <label class="toggle">
-        <input
-          type="checkbox"
-          .checked=${this._shown(overlay)}
-          @change=${(ev: Event) =>
-            this._emit("overlay-toggled", { overlay, shown: (ev.target as HTMLInputElement).checked })}
-        />
+      <button
+        class="toggle"
+        aria-pressed=${String(shown)}
+        title=${shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
+        @click=${() => this._emit("overlay-toggled", { overlay, shown: !shown })}
+      >
         <i class=${`swatch ${swatch}`}></i>${label}
-      </label>
+      </button>
     `;
   }
 
@@ -700,13 +700,22 @@ export class Ld2450ZoneMap extends LitElement {
       stroke-width: 2.5;
       stroke-linejoin: round;
     }
-    .legend label.toggle {
+    .legend button.toggle {
       display: inline-flex;
       align-items: center;
+      padding: 0;
+      font: inherit;
+      color: var(--secondary-text-color);
+      background: none;
+      border: none;
       cursor: pointer;
+      opacity: 0.5;
     }
-    .legend label.toggle input {
-      margin: 0 4px 0 0;
+    /* Shown: bright and bold; hidden: faded */
+    .legend button.toggle[aria-pressed="true"] {
+      color: var(--primary-text-color);
+      font-weight: 500;
+      opacity: 1;
     }
     .swatch.floor-plan {
       box-sizing: border-box;

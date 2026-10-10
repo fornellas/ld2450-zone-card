@@ -500,10 +500,10 @@ describe("ld2450-zone-card", () => {
     const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & { updateComplete: Promise<unknown> };
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
-    const toggles = [...map.shadowRoot!.querySelectorAll<HTMLInputElement>("label.toggle input")];
+    const toggles = [...map.shadowRoot!.querySelectorAll<HTMLButtonElement>("button.toggle")];
     expect(toggles).toHaveLength(6);
-    toggles[2].checked = false;
-    toggles[2].dispatchEvent(new Event("change"));
+    expect(toggles[2].getAttribute("aria-pressed")).toBe("true");
+    toggles[2].click();
     await (root.host as Ld2450ZoneCard).updateComplete;
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).toBeNull();
