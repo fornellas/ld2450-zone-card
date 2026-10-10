@@ -304,7 +304,7 @@ export class Ld2450ZoneCard extends LitElement {
           </select>
         </label>
         <label>
-          Edit
+          Zone
           <select @change=${this._zoneChanged}>
             ${device.zones.map(
               (z) => html`<option value=${z.polygon} ?selected=${target?.key === z.polygon}>${z.name}</option>`,
