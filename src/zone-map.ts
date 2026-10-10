@@ -674,16 +674,18 @@ export class Ld2450ZoneMap extends LitElement {
       fill: var(--text-accent-color, #fff);
       font-weight: 700;
     }
+    /* Two lines of three: outlines, then what's on them, in equal columns */
     .legend {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px 16px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 4px 12px;
       margin-top: 8px;
       font-size: 0.85em;
       color: var(--secondary-text-color);
     }
     .swatch {
       display: inline-block;
+      flex-shrink: 0;
       width: 16px;
       height: 10px;
       margin-right: 6px;
@@ -703,6 +705,8 @@ export class Ld2450ZoneMap extends LitElement {
     .legend button.toggle {
       display: inline-flex;
       align-items: center;
+      justify-self: start;
+      text-align: left;
       padding: 0;
       font: inherit;
       color: var(--secondary-text-color);
