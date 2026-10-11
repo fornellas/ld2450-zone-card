@@ -44,7 +44,7 @@ describe("ld2450-zone-map fitting", () => {
       { x: 500, y: 2000 },
     ];
     const zoneOnly = await viewBox((map) => {
-      map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+      map.overlays = { trackingRange: false, floorPlan: false };
       map.zones = [{ name: "Couch", points: zone, selected: true, occupied: false }];
     });
     // The zone and the radar need far less room than the tracking range and limits
@@ -54,7 +54,7 @@ describe("ld2450-zone-map fitting", () => {
   it("fits the tracking range when nothing else is shown", async () => {
     const all = await viewBox(() => undefined);
     const nothingShown = await viewBox((map) => {
-      map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+      map.overlays = { trackingRange: false, floorPlan: false };
     });
     expect(nothingShown[3]).toBeGreaterThan(all[3] * 0.9);
   });
@@ -105,7 +105,7 @@ describe("ld2450-zone-map snapping", () => {
 describe("ld2450-zone-map fitting targets and trail", () => {
   async function width(setup: (map: Ld2450ZoneMap) => void): Promise<number> {
     const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
-    map.overlays = { trackingRange: false, pointLimits: false, floorPlan: false };
+    map.overlays = { trackingRange: false, floorPlan: false };
     // A small zone near the radar, so the map fits tightly unless something else is far away
     map.zones = [
       {

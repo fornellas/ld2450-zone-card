@@ -1,7 +1,7 @@
 import { LitElement, css, html, nothing } from "lit";
 import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
-import { clipToRect, insidePolygon, perimeter } from "./geometry";
+import { insidePolygon, perimeter } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
 import { fetchEntityIdParts } from "./naming";
 import {
@@ -10,10 +10,6 @@ import {
   type Point,
   type PolygonCheck,
   checkFloorPlan,
-  POLYGON_MAX_X,
-  POLYGON_MAX_Y,
-  POLYGON_MIN_X,
-  POLYGON_MIN_Y,
   checkPolygon,
   formatPolygon,
   parsePolygon,
@@ -701,7 +697,8 @@ export class Ld2450ZoneCard extends LitElement {
         zone: zone.polygon,
         ok: false,
         message:
-          `Not saved: the device didn't accept the polygon` +
+          `Not saved: the device didn't accept the polygon, for example because a point is outside the area it ` +
+          `accepts` +
           (kept === undefined ? "." : `, and kept "${kept === "" ? "(empty)" : kept}".`) +
           " Your changes are kept, so you can fix them and save again.",
       };
@@ -825,18 +822,14 @@ export class Ld2450ZoneCard extends LitElement {
 
   /**
    * Replace the zone with a perimeter around the trail, keeping the margin to every point. It's built in room
-   * coordinates, so its edges line up with the map, then cut to the zone point limits so the device accepts it.
+   * coordinates, so its edges line up with the map.
    */
   private _fitToTrail(target: Target, mount: Mount, trail: Point[]): void {
     const room = perimeter(
       trail.map((p) => toRoom(p, mount)),
       this._trailMargin,
     );
-    const points = clipToRect(
-      room.map((p) => toRadar(p, mount)),
-      { x: POLYGON_MIN_X, y: POLYGON_MIN_Y },
-      { x: POLYGON_MAX_X, y: POLYGON_MAX_Y },
-    );
+    const points = room.map((p) => toRadar(p, mount));
     this._setDraft(target, points);
   }
 

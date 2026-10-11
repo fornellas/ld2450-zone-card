@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_PERIMETER_POINTS,
-  clipToRect,
   distance,
   distanceToSegment,
   insertionIndex,
@@ -43,10 +42,8 @@ describe("checkPolygon", () => {
     expect(checkPolygon(points).errors).toEqual(["A zone can have at most 23 points."]);
   });
 
-  it("finds points outside the limits", () => {
-    const check = checkPolygon([...square, { x: 5000, y: 100 }, { x: 0, y: -1 }]);
-    expect(check.outside).toEqual([4, 5]);
-    expect(check.errors).toEqual(["Points 5, 6 are outside the zone point limits."]);
+  it("leaves coordinates to the device", () => {
+    expect(checkPolygon([...square, { x: 99999, y: -5000 }])).toEqual({ errors: [], warnings: [], outside: [] });
   });
 
   it("warns about points outside the tracking range", () => {
@@ -54,10 +51,6 @@ describe("checkPolygon", () => {
     expect(check.errors).toEqual([]);
     expect(check.warnings).toEqual(["Points 2, 3 are outside the tracking range, where the radar can't see anyone."]);
     expect(check.outside).toEqual([1, 2]);
-  });
-
-  it("checks the rounded values, as sent", () => {
-    expect(checkPolygon([...square.slice(0, 3), { x: 4860.4, y: -0.4 }]).outside).toEqual([]);
   });
 });
 
@@ -131,22 +124,5 @@ describe("perimeter", () => {
 
   it("is empty without points", () => {
     expect(perimeter([], 200)).toEqual([]);
-  });
-});
-
-describe("clipToRect", () => {
-  it("cuts a polygon to the rectangle", () => {
-    const square = [
-      { x: -100, y: -100 },
-      { x: 100, y: -100 },
-      { x: 100, y: 100 },
-      { x: -100, y: 100 },
-    ];
-    expect(clipToRect(square, { x: 0, y: 0 }, { x: 1000, y: 1000 })).toEqual([
-      { x: 0, y: 0 },
-      { x: 100, y: 0 },
-      { x: 100, y: 100 },
-      { x: 0, y: 100 },
-    ]);
   });
 });

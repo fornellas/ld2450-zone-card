@@ -206,12 +206,6 @@ describe("ld2450-zone-card", () => {
       expect(button("Revert").disabled).toBe(false);
     });
 
-    it("flags points outside the limits", async () => {
-      const { type, root } = await edit();
-      await type("0,0;6000,0;0,600");
-      expect(root.querySelector(".errors")!.textContent).toContain("Point 2 is outside");
-    });
-
     it("clears and reverts", async () => {
       const { button, update, deviceValue } = await edit();
       button("Clear").click();
@@ -369,10 +363,30 @@ describe("ld2450-zone-card", () => {
         expect(deviceValue()).toBe("0,0;2000,0;2000,600");
       });
 
-      it("can't save polygons the device would reject", async () => {
+      it("can't save zones with too few points", async () => {
         const { type, button } = await edit();
-        await type("0,0;6000,0;0,600");
+        await type("0,0;6000,0");
         expect(button("Save").disabled).toBe(true);
+      });
+
+      it("tells when the device rejects a point it can't take", async () => {
+        Ld2450ZoneCard.saveTimeoutMs = 20;
+        try {
+          const { type, button, update, root, deviceValue } = await edit();
+          // Far beyond what the device accepts: the card saves it, and the device publishes its old polygon back
+          await type("0,0;9000,0;0,600");
+          expect(button("Save").disabled).toBe(false);
+          button("Save").click();
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          await update();
+          expect(calls).toContainEqual({ type: "text.set_value", value: "0,0;9000,0;0,600", entity_id: "text.couch" });
+          const error = root.querySelector("p.error")!.textContent!;
+          expect(error).toContain("outside the area it accepts");
+          expect(error).toContain('kept "0,0;1000,0;1000,600"');
+          expect(deviceValue()).toBe("0,0;9000,0;0,600");
+        } finally {
+          Ld2450ZoneCard.saveTimeoutMs = 5000;
+        }
       });
     });
 
@@ -501,9 +515,9 @@ describe("ld2450-zone-card", () => {
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).not.toBeNull();
     const toggles = [...map.shadowRoot!.querySelectorAll<HTMLButtonElement>("button.toggle")];
-    expect(toggles).toHaveLength(6);
-    expect(toggles[2].getAttribute("aria-pressed")).toBe("true");
-    toggles[2].click();
+    expect(toggles).toHaveLength(5);
+    expect(toggles[1].getAttribute("aria-pressed")).toBe("true");
+    toggles[1].click();
     await (root.host as Ld2450ZoneCard).updateComplete;
     await map.updateComplete;
     expect(map.shadowRoot!.querySelector("polygon.floor-plan")).toBeNull();
@@ -645,7 +659,7 @@ describe("ld2450-zone-card", () => {
     await map.updateComplete;
     expect(
       [...map.shadowRoot!.querySelectorAll(".legend > *")].map((el) => el.textContent!.replace(/\s+/g, " ").trim()),
-    ).toEqual(["Tracking range", "Zone point limits", "Floor plan", "Selected zone", "Occupied", "Targets"]);
+    ).toEqual(["Tracking range", "Floor plan", "Selected zone", "Occupied", "Targets"]);
   });
 
   it("shows the snap step only while snapping to the grid", async () => {

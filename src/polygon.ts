@@ -5,10 +5,6 @@ export const POLYGON_MIN = 0;
 export const POLYGON_MAX = 255;
 export const POLYGON_MIN_POINTS = 3;
 export const POLYGON_MAX_POINTS = 23;
-export const POLYGON_MIN_X = -4860;
-export const POLYGON_MAX_X = 4860;
-export const POLYGON_MIN_Y = 0;
-export const POLYGON_MAX_Y = 7560;
 
 export interface Point {
   x: number;
@@ -89,7 +85,7 @@ export interface PolygonCheck {
   errors: string[];
   /** Problems the device accepts, but are likely mistakes. */
   warnings: string[];
-  /** Indexes of points with a problem: outside the limits or the tracking range. */
+  /** Indexes of points outside the tracking range. */
   outside: number[];
 }
 
@@ -98,8 +94,9 @@ function pointList(indexes: number[]): string {
 }
 
 /**
- * Check a polygon in radar coordinates against what the firmware accepts, and optionally against where the radar
- * can track. An empty polygon disables the zone.
+ * Check a polygon in radar coordinates: its number of points, and optionally whether it's where the radar can track.
+ * An empty polygon disables the zone. The device checks the coordinates itself, and publishes its previous polygon
+ * back if it rejects them.
  */
 export function checkPolygon(points: Point[], trackingRange?: (p: Point) => boolean): PolygonCheck {
   const errors: string[] = [];
@@ -109,21 +106,15 @@ export function checkPolygon(points: Point[], trackingRange?: (p: Point) => bool
   if (points.length > POLYGON_MAX_POINTS) {
     errors.push(`A zone can have at most ${POLYGON_MAX_POINTS} points.`);
   }
-  const outsideLimits: number[] = [];
   const outsideRange: number[] = [];
   points.forEach((p, i) => {
-    const x = Math.round(p.x);
-    const y = Math.round(p.y);
-    if (x < POLYGON_MIN_X || x > POLYGON_MAX_X || y < POLYGON_MIN_Y || y > POLYGON_MAX_Y) {
-      outsideLimits.push(i);
-    } else if (trackingRange !== undefined && !trackingRange({ x, y })) {
+    if (trackingRange !== undefined && !trackingRange({ x: Math.round(p.x), y: Math.round(p.y) })) {
       outsideRange.push(i);
     }
   });
-  if (outsideLimits.length > 0) errors.push(`${pointList(outsideLimits)} outside the zone point limits.`);
   const warnings =
     outsideRange.length > 0
       ? [`${pointList(outsideRange)} outside the tracking range, where the radar can't see anyone.`]
       : [];
-  return { errors, warnings, outside: [...outsideLimits, ...outsideRange].sort((a, b) => a - b) };
+  return { errors, warnings, outside: outsideRange };
 }

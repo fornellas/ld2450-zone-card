@@ -1,4 +1,4 @@
-import type { Point } from "./polygon";
+import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 
 export function distance(a: Point, b: Point): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
@@ -52,8 +52,8 @@ export function insidePolygon(p: Point, polygon: Point[], tolerance = 1): boolea
 const PERIMETER_DIRECTIONS = 32;
 // Perimeter edges shorter than this, in mm, are dropped, so points don't bunch up
 const MIN_PERIMETER_EDGE = 150;
-// Most points a perimeter has: the device takes 23, and clipping it to a rectangle can add up to 4
-export const MAX_PERIMETER_POINTS = 19;
+// Most points a perimeter has: as many as a zone can have
+export const MAX_PERIMETER_POINTS = POLYGON_MAX_POINTS;
 
 /**
  * A convex polygon around the points, keeping every point at least margin inside it. Its edges point in fixed
@@ -99,30 +99,4 @@ export function perimeter(points: Point[], margin: number): Point[] {
     if (shortest < 0) return v;
     edges.splice(shortest, 1);
   }
-}
-
-/** Clip a convex polygon to an axis-aligned rectangle (Sutherland–Hodgman). */
-export function clipToRect(polygon: Point[], min: Point, max: Point): Point[] {
-  const edges: [(p: Point) => number, (a: Point, b: Point) => Point][] = [
-    [(p) => p.x - min.x, (a, b) => ({ x: min.x, y: a.y + ((b.y - a.y) * (min.x - a.x)) / (b.x - a.x) })],
-    [(p) => max.x - p.x, (a, b) => ({ x: max.x, y: a.y + ((b.y - a.y) * (max.x - a.x)) / (b.x - a.x) })],
-    [(p) => p.y - min.y, (a, b) => ({ x: a.x + ((b.x - a.x) * (min.y - a.y)) / (b.y - a.y), y: min.y })],
-    [(p) => max.y - p.y, (a, b) => ({ x: a.x + ((b.x - a.x) * (max.y - a.y)) / (b.y - a.y), y: max.y })],
-  ];
-  let output = polygon;
-  for (const [inside, cross] of edges) {
-    const input = output;
-    output = [];
-    for (let i = 0; i < input.length; i++) {
-      const current = input[i];
-      const previous = input[(i + input.length - 1) % input.length];
-      if (inside(current) >= 0) {
-        if (inside(previous) < 0) output.push(cross(previous, current));
-        output.push(current);
-      } else if (inside(previous) >= 0) {
-        output.push(cross(previous, current));
-      }
-    }
-  }
-  return output;
 }

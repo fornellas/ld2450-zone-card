@@ -5,7 +5,7 @@ import type { Units } from "./units";
 
 const KEY = "ld2450_zone_card";
 
-export type Overlay = "trackingRange" | "pointLimits" | "floorPlan" | "selectedZone" | "occupied" | "targets";
+export type Overlay = "trackingRange" | "floorPlan" | "selectedZone" | "occupied" | "targets";
 
 export interface UserSettings {
   units?: Units;
@@ -24,6 +24,12 @@ export interface UserSettings {
 export async function fetchUserSettings(hass: HomeAssistant): Promise<UserSettings> {
   try {
     const { value } = await hass.callWS<{ value: UserSettings | null }>({ type: "frontend/get_user_data", key: KEY });
+    // Earlier versions had a "zone point limits" overlay; drop its toggle, so it goes with the next save
+    const overlays = value?.overlays as Record<string, boolean> | undefined;
+    if (overlays !== undefined && "pointLimits" in overlays) {
+      const { pointLimits: _, ...rest } = overlays;
+      return { ...value, overlays: rest };
+    }
     return value ?? {};
   } catch {
     return {};

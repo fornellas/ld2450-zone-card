@@ -24,13 +24,12 @@ evaluated on the device.
 
 - **Top-down view** of the room, with a grid in metric or imperial units (chosen per user).
 - **Tracking range:** where the radar can see, from the measured plot in the HLK-LD2450 manual.
-- **Zone point limits:** the area the firmware accepts for zone points.
 - **Floor plan:** an outline of the room you draw yourself.
 - **Zones:** the selected zone is highlighted, the others are dashed, and occupied zones (from their presence
   sensors) are filled.
 - **Targets:** live positions of up to three people, also listed under the map.
-- **Toggle anything** by clicking it in the legend: tracking range, zone point limits, floor plan, selected zone,
-  occupied and targets. The choice is saved per user.
+- **Toggle anything** by clicking it in the legend: tracking range, floor plan, selected zone, occupied and targets.
+  The choice is saved per user.
 - **Fits what's shown:** the map zooms to the visible items, targets and trail.
 
 ### Editing zones
@@ -41,10 +40,11 @@ evaluated on the device.
 - **Snapping:** to a grid with a configurable step, and to nearby points of the floor plan and other zones.
 - **Undo and redo**, with buttons or Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y). A whole drag is one step.
 - **Clear and Revert:** start over, or go back to what's on the device.
-- **Checks before saving:** too few or too many points (the firmware takes 3 to 23), and points outside the zone point
-  limits, are errors. Points outside the tracking range are warnings.
+- **Checks before saving:** too few or too many points (the firmware takes 3 to 23) are errors. Points outside the
+  tracking range are warnings.
 - **Save with confirmation:** the card writes the zone and waits for the device to report it back. If Home Assistant
-  or the device rejects it, the card says so and keeps your drawing to fix and save again. An empty zone disables it.
+  or the device rejects it, for example because a point is outside the area the device accepts, the card says so and
+  keeps your drawing to fix and save again. An empty zone disables it.
 
 ### Trail and automatic zones
 

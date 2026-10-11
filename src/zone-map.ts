@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing, svg } from "lit";
-import { DETECTION_AREA, FIRMWARE_BOUNDS } from "./detection-area";
+import { DETECTION_AREA } from "./detection-area";
 import { distance, insertionIndex, snap } from "./geometry";
 import { POLYGON_MAX_POINTS, type Point } from "./polygon";
 import type { TargetPosition } from "./targets";
@@ -144,7 +144,6 @@ export class Ld2450ZoneMap extends LitElement {
 
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
-    const bounds = FIRMWARE_BOUNDS.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
     const floorPlan = this.floorPlan.map((p) => toRoom(p, this.mount));
     // Fit what's shown: the radar, the zones, the outlines that are on, the targets and the trail. Not the polygon
@@ -154,7 +153,6 @@ export class Ld2450ZoneMap extends LitElement {
       radar,
       ...this.zones.flatMap((z) => z.points.map((p) => toRoom(p, this.mount))),
       ...(this._shown("trackingRange") ? area : []),
-      ...(this._shown("pointLimits") ? bounds : []),
       ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
     ];
     // Targets and trail points are drawn as circles around their position, so leave room for them
@@ -210,7 +208,6 @@ export class Ld2450ZoneMap extends LitElement {
             ? svg`<polygon class="floor-plan" points=${pointsAttr(floorPlan)}></polygon>`
             : nothing
         }
-        ${this._shown("pointLimits") ? svg`<polygon class="bounds" points=${pointsAttr(bounds)}></polygon>` : nothing}
         ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
         ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTrail(font)}
         ${this._shown("targets") ? this._renderTargets(font) : nothing}
@@ -218,9 +215,8 @@ export class Ld2450ZoneMap extends LitElement {
       </svg>
       <div class="legend">
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
-        ${this._renderToggle("pointLimits", "bounds", "Zone point limits")}
         ${this._renderToggle("floorPlan", "floor-plan", "Floor plan")}
-        ${this._renderToggle("selectedZone", "zone", "Selected zone")}
+        ${this._renderToggle("selectedZone", "zone", "Selected zone", "row-start")}
         ${this._renderToggle("occupied", "occupied", "Occupied")} ${this._renderToggle("targets", "target", "Targets")}
       </div>
     `;
@@ -237,11 +233,11 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   /** A legend entry that shows or hides what it names when clicked. Fires "overlay-toggled" with { overlay, shown }. */
-  private _renderToggle(overlay: Overlay, swatch: string, label: string) {
+  private _renderToggle(overlay: Overlay, swatch: string, label: string, extraClass = "") {
     const shown = this._shown(overlay);
     return html`
       <button
-        class="toggle"
+        class=${`toggle ${extraClass}`}
         aria-pressed=${String(shown)}
         title=${shown ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
         @click=${() => this._emit("overlay-toggled", { overlay, shown: !shown })}
@@ -566,12 +562,6 @@ export class Ld2450ZoneMap extends LitElement {
       stroke-opacity: 0.45;
       stroke-width: 1.5;
     }
-    .bounds {
-      fill: none;
-      stroke: var(--secondary-text-color);
-      stroke-width: 1;
-      stroke-dasharray: 2 4;
-    }
     .radar polygon {
       fill: var(--primary-text-color);
     }
@@ -674,7 +664,7 @@ export class Ld2450ZoneMap extends LitElement {
       fill: var(--text-accent-color, #fff);
       font-weight: 700;
     }
-    /* Two lines of three: outlines, then what's on them, in equal columns */
+    /* Two lines, in equal columns: outlines, then what's drawn on them */
     .legend {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -701,6 +691,10 @@ export class Ld2450ZoneMap extends LitElement {
       stroke: var(--primary-text-color);
       stroke-width: 2.5;
       stroke-linejoin: round;
+    }
+    /* What's drawn on the outlines starts the second line */
+    .legend button.toggle.row-start {
+      grid-column-start: 1;
     }
     .legend button.toggle {
       display: inline-flex;
@@ -738,9 +732,6 @@ export class Ld2450ZoneMap extends LitElement {
     .swatch.occupied {
       background: color-mix(in srgb, var(--yellow-color, #ffeb3b) 45%, transparent);
       border: 1px solid var(--secondary-text-color);
-    }
-    .swatch.bounds {
-      border: 1px dashed var(--secondary-text-color);
     }
   `;
 }
