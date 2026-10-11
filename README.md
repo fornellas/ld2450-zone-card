@@ -109,6 +109,19 @@ down** option instead.
 
 ### Configuration
 
+Auto-discovery depends on the default configuration. If you change anything, you'll need to manually specify the
+entities. Discovery relies on these defaults:
+
+- **Target X/Y sensors:** `sensor` entities on the same device as the zones, with `device_class: distance`, a length
+  unit (mm by default, or any length unit Home Assistant shows them in), and icons `mdi:alpha-x-box-outline` (X) and
+  `mdi:alpha-y-box-outline` (Y). The X and Y of a target are paired by their names, which must differ only by "X"
+  and "Y" (for example `Target-1 X` and `Target-1 Y`).
+- **Presence sensors:** `binary_sensor` entities on the same device as the zones, with `device_class: occupancy` and
+  no icon, paired with their zones by name (see above).
+
+Changing an icon, device class or unit in your ESPHome YAML or in Home Assistant hides that entity from discovery.
+Name it in the `targets:` (target X/Y sensors) or `zones:` (presence sensors) option instead.
+
 Every option is optional, and overrides automatic discovery:
 
 ```yaml
