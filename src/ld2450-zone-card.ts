@@ -18,7 +18,7 @@ import {
   formatPolygon,
   parsePolygon,
 } from "./polygon";
-import { type TargetPosition, readTargets } from "./targets";
+import { type TargetPosition, TargetTracker } from "./targets";
 import {
   type SystemSettings,
   deviceFloorPlan,
@@ -158,6 +158,8 @@ export class Ld2450ZoneCard extends LitElement {
   private _currentTarget?: Target;
   /** The device shown. */
   private _currentDevice?: string;
+  /** Pairs target X and Y from the same radar frame. */
+  private _tracker = new TargetTracker();
   /** Whether the trail is on. Off on every load. */
   private _trailOn = false;
   /** The trail margin while the user is typing it. */
@@ -290,8 +292,9 @@ export class Ld2450ZoneCard extends LitElement {
     this._currentDevice = device.id;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
-    const targets = readTargets(this.hass!, device.targets);
-    if (this._trailOn) this._recordTrail(device.id, targets);
+    // The map shows the last positions whose X and Y were in sync; the trail records only new ones
+    const { positions: targets, fresh } = this._tracker.read(this.hass!, device.targets);
+    if (this._trailOn) this._recordTrail(device.id, fresh);
     return html`
       <div class="selectors">
         <label>
@@ -771,7 +774,7 @@ export class Ld2450ZoneCard extends LitElement {
     this._snapSaveTimer = setTimeout(() => this._saveUserSettings(), SAVE_DELAY_MS);
   }
 
-  /** Add where targets are now to the device's trail. */
+  /** Add new in-sync target positions to the device's trail. */
   private _recordTrail(deviceId: string, targets: TargetPosition[]): void {
     const last = (this._trailLast[deviceId] ??= {});
     let trail = this._trails[deviceId] ?? [];

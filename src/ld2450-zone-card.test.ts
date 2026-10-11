@@ -527,10 +527,14 @@ describe("ld2450-zone-card", () => {
         await map.updateComplete;
       };
       const circles = () => map.shadowRoot!.querySelectorAll(".trail circle").length;
-      const move = async (x: number, y: number) => {
+      let clock = Date.parse("2026-10-11T12:00:00Z");
+      /** Move target 1, X and Y updated together as one radar frame, unless yLag (ms) delays Y. */
+      const move = async (x: number, y: number, yLag = 0) => {
+        clock += 1000;
         const states = { ...card.hass!.states };
-        states["sensor.t1_x"] = { ...states["sensor.t1_x"], state: String(x) };
-        states["sensor.t1_y"] = { ...states["sensor.t1_y"], state: String(y) };
+        const at = (ms: number) => new Date(ms).toISOString();
+        states["sensor.t1_x"] = { ...states["sensor.t1_x"], state: String(x), last_updated: at(clock) };
+        states["sensor.t1_y"] = { ...states["sensor.t1_y"], state: String(y), last_updated: at(clock + yLag) };
         card.hass = { ...card.hass!, states };
         await update();
       };
@@ -591,10 +595,21 @@ describe("ld2450-zone-card", () => {
       // Not saved: it's off again on every load
       expect(calls.filter((c) => c.type === "frontend/set_user_data")).toEqual([]);
       await move(100, 1000);
+      // The same position published again isn't recorded twice
       await move(100, 1000);
       await move(200, 1100);
-      // The position when it was turned on, and two moves
-      expect(circles()).toBe(3);
+      expect(circles()).toBe(2);
+    });
+
+    it("only records positions whose X and Y were updated together", async () => {
+      const { circles, move, toggle } = await withTrail();
+      await toggle(true);
+      await move(100, 1000);
+      // Y from a later radar frame than X: not a real position
+      await move(900, 3000, 300);
+      expect(circles()).toBe(1);
+      await move(900, 3000);
+      expect(circles()).toBe(2);
     });
 
     it("clears with the button, and when turned off", async () => {
@@ -608,8 +623,10 @@ describe("ld2450-zone-card", () => {
       expect(circles()).toBe(1);
       await toggle(false);
       expect(circles()).toBe(0);
-      // Turned on again, it starts afresh from where the target is now
+      // Turned on again, it starts afresh with the next position
       await toggle(true);
+      expect(circles()).toBe(0);
+      await move(300, 1000);
       expect(circles()).toBe(1);
     });
   });

@@ -6,6 +6,8 @@ export interface HassEntity {
   attributes: Record<string, unknown>;
   last_changed: string;
   last_updated: string;
+  /** When the state was last written, even with the same value. */
+  last_reported?: string;
 }
 
 /** An entry of hass.entities, the entity registry as the frontend sees it. */

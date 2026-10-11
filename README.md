@@ -49,7 +49,9 @@ evaluated on the device.
 ### Trail and automatic zones
 
 - **Trail:** while on, every position where a target is seen is kept (the last 7,000 per device) and drawn on the map,
-  so you can see where people actually walk, sit or stand. It's off on every page load.
+  so you can see where people actually walk, sit or stand. It's off on every page load. It only records positions
+  whose X and Y were updated together, from the same radar frame, so it doesn't mix the X of one moment with the Y
+  of another.
 - **Fit zone to trail:** turns the trail into a zone around all its points, keeping a margin you choose to each. It's
   a normal edit, so it can be undone and adjusted before saving.
 
