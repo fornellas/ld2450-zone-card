@@ -97,6 +97,10 @@ The device needs polygon zones in its ESPHome configuration: zones under `text: 
 `polygon_zones`, each with a presence sensor under `binary_sensor: - platform: ld2450` → `polygon_zones`. Show the
 targets with `target_1`…`target_3` `x` and `y` sensors under `sensor: - platform: ld2450`.
 
+Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch Occupied`) and the card pairs them
+automatically. Other names are paired by the words they share, and a zone that matches more than one sensor equally
+well is left for you to pair in the [configuration](#configuration).
+
 Zones are checked on the device in the radar's own coordinates, and target sensors are drawn on the same map, so don't
 change their values with filters (for example multiplying X by -1 for an upside down radar). Use the card's **Upside
 down** option instead.

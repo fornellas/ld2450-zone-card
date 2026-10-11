@@ -187,14 +187,84 @@ describe("discover", () => {
     expect(discover(hass, { device_id: "dev1" }).map((d) => d.id)).toEqual(["dev1"]);
   });
 
-  it("leaves ambiguous presence sensors unpaired", () => {
-    const hass = mockHass({ dev1: "Office" }, [
-      zone("text.a", "Office Desk Zone"),
-      zone("text.b", "Office Desk Left Zone"),
-      presence("binary_sensor.desk", "Office Desk Occupied"),
-    ]);
-    const [device] = discover(hass);
-    expect(device.zones.map((z) => z.presence)).toEqual([undefined, undefined]);
+  describe("pairing zones with presence sensors", () => {
+    const presenceOf = (entities: MockEntity[]) =>
+      Object.fromEntries(discover(mockHass({ dev1: "Office" }, entities))[0].zones.map((z) => [z.polygon, z.presence]));
+
+    it('pairs "<zone name> Occupied"', () => {
+      expect(
+        presenceOf([
+          zone("text.seat", "Office Window Seat"),
+          presence("binary_sensor.seat", "Office Window Seat Occupied"),
+        ]),
+      ).toEqual({ "text.seat": "binary_sensor.seat" });
+    });
+
+    it("pairs zones that share words by their exact match", () => {
+      expect(
+        presenceOf([
+          zone("text.left", "Office Couch Left"),
+          zone("text.right", "Office Couch Right"),
+          presence("binary_sensor.right", "Office Couch Right Occupied"),
+          presence("binary_sensor.left", "Office Couch Left Occupied"),
+        ]),
+      ).toEqual({ "text.left": "binary_sensor.left", "text.right": "binary_sensor.right" });
+    });
+
+    it("pairs the exact match, and leaves a zone that only shares a word unpaired", () => {
+      expect(
+        presenceOf([
+          zone("text.a", "Office Desk Zone"),
+          zone("text.b", "Office Desk Left Zone"),
+          presence("binary_sensor.desk", "Office Desk Occupied"),
+        ]),
+      ).toEqual({ "text.a": "binary_sensor.desk", "text.b": undefined });
+    });
+
+    it("prefers the sensor sharing more words", () => {
+      expect(
+        presenceOf([
+          zone("text.a", "Office Big Desk Left"),
+          presence("binary_sensor.one", "Office Desk Occupied"),
+          presence("binary_sensor.two", "Office Desk Left Occupied"),
+        ]),
+      ).toEqual({ "text.a": "binary_sensor.two" });
+    });
+
+    it("leaves a zone unpaired when sensors tie for it", () => {
+      expect(
+        presenceOf([
+          zone("text.desk", "Office Desk"),
+          presence("binary_sensor.left", "Office Desk Left Occupied"),
+          presence("binary_sensor.right", "Office Desk Right Occupied"),
+        ]),
+      ).toEqual({ "text.desk": undefined });
+    });
+
+    it("leaves zones unpaired when they tie for a sensor", () => {
+      expect(
+        presenceOf([
+          zone("text.a", "Office Desk A"),
+          zone("text.b", "Office Desk B"),
+          presence("binary_sensor.desk", "Office Desk Occupied"),
+        ]),
+      ).toEqual({ "text.a": undefined, "text.b": undefined });
+    });
+
+    it("doesn't give a sensor set in the config to another zone", () => {
+      const [device] = discover(
+        mockHass({ dev1: "Office" }, [
+          zone("text.a", "Office Couch"),
+          zone("text.b", "Office Couch Left"),
+          presence("binary_sensor.couch", "Office Couch Occupied"),
+        ]),
+        { zones: [{ polygon: "text.b", presence: "binary_sensor.couch" }] },
+      );
+      expect(device.zones.map((z) => [z.polygon, z.presence])).toEqual([
+        ["text.a", undefined],
+        ["text.b", "binary_sensor.couch"],
+      ]);
+    });
   });
 
   it("uses overrides for presence and targets", () => {

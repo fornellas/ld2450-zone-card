@@ -179,11 +179,23 @@ function findTargets(hass: HomeAssistant, entityIds: string[], devName: string, 
   return targets;
 }
 
+// Scores of a zone-sensor pair: sharing all their words beats sharing any number of them
+const EXACT_MATCH = 1000;
+
+/**
+ * Pair zones with their presence sensors by name, after removing the device name and words like "zone" or
+ * "occupied": "Couch Left" pairs with "Couch Left Occupied". Every zone-sensor pair is scored, exact matches of the
+ * remaining words highest, then by how many words they share, and pairs are made one-to-one, best score first. A
+ * zone whose best score ties between sensors, or that ties with another zone for a sensor, stays unpaired, for the
+ * user to set in the card config.
+ */
 function pairPresence(hass: HomeAssistant, zones: Zone[], entityIds: string[], devName: string): void {
+  const taken = new Set(zones.map((z) => z.presence).filter((p) => p !== undefined));
   const candidates = entityIds.filter((id) => {
     const s = hass.states[id];
     return (
       id.startsWith("binary_sensor.") &&
+      !taken.has(id) &&
       s !== undefined &&
       s.attributes.device_class === "occupancy" &&
       s.attributes.icon === undefined
@@ -192,20 +204,37 @@ function pairPresence(hass: HomeAssistant, zones: Zone[], entityIds: string[], d
   const devWords = new Set(words(devName));
   const keyWords = (id: string) =>
     new Set(words(friendlyName(hass, id)).filter((w) => !devWords.has(w) && !ZONE_NAME_STOPWORDS.has(w)));
-  const candidateWords = candidates.map((id) => ({ id, words: keyWords(id) }));
+  const sensorWords = candidates.map((id) => ({ id, words: keyWords(id) }));
 
-  const used = new Map<string, Zone[]>();
+  const pairs: { zone: Zone; sensor: string; score: number }[] = [];
   for (const zone of zones) {
     if (zone.presence !== undefined) continue;
     const zoneWords = keyWords(zone.polygon);
-    const matches = candidateWords.filter((c) => [...zoneWords].some((w) => c.words.has(w)));
-    if (matches.length !== 1) continue;
-    zone.presence = matches[0].id;
-    used.set(zone.presence, [...(used.get(zone.presence) ?? []), zone]);
+    for (const sensor of sensorWords) {
+      const shared = [...zoneWords].filter((w) => sensor.words.has(w)).length;
+      if (shared === 0) continue;
+      const exact = shared === zoneWords.size && shared === sensor.words.size;
+      pairs.push({ zone, sensor: sensor.id, score: exact ? EXACT_MATCH + shared : shared });
+    }
   }
-  // A sensor matching several zones is ambiguous
-  for (const shared of used.values()) {
-    if (shared.length > 1) for (const zone of shared) zone.presence = undefined;
+
+  const settled = new Set<Zone>();
+  const used = new Set<string>();
+  for (const score of [...new Set(pairs.map((p) => p.score))].sort((a, b) => b - a)) {
+    const open = () => pairs.filter((p) => p.score === score && !settled.has(p.zone) && !used.has(p.sensor));
+    // A zone with several sensors at its best score is ambiguous
+    for (const zone of new Set(open().map((p) => p.zone))) {
+      if (open().filter((p) => p.zone === zone).length > 1) settled.add(zone);
+    }
+    for (const sensor of new Set(open().map((p) => p.sensor))) {
+      const contenders = open().filter((p) => p.sensor === sensor);
+      // So is a sensor that several zones match equally well
+      for (const p of contenders) settled.add(p.zone);
+      if (contenders.length === 1) {
+        contenders[0].zone.presence = sensor;
+        used.add(sensor);
+      }
+    }
   }
 }
 
