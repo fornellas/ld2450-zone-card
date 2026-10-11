@@ -3,6 +3,7 @@
 import type { TargetSensors } from "./discovery";
 import type { HomeAssistant } from "./ha-types";
 import type { Point } from "./polygon";
+import { toMillimetres } from "./units";
 
 export interface TargetPosition {
   /** Short label for the map: "1", "2", "3". */
@@ -12,11 +13,14 @@ export interface TargetPosition {
   point: Point;
 }
 
+/** A target sensor's value in mm, converted from the unit HA shows it in. Undefined without a length unit. */
 function coordinate(hass: HomeAssistant, entityId: string): number | undefined {
-  const state = hass.states[entityId]?.state;
+  const stateObj = hass.states[entityId];
+  const state = stateObj?.state;
   if (state === undefined || state.trim() === "") return undefined;
   const value = Number(state);
-  return Number.isFinite(value) ? value : undefined;
+  if (!Number.isFinite(value)) return undefined;
+  return toMillimetres(value, stateObj.attributes.unit_of_measurement);
 }
 
 /** Targets being tracked now. Slots that are "unknown", "unavailable" or at (0, 0) are not tracking anyone. */

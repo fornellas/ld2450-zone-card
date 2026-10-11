@@ -3,6 +3,7 @@
 import type { EntityNameType, HassEntity, HomeAssistant } from "./ha-types";
 import { DEFAULT_ENTITY_ID_PARTS, deviceNameParts } from "./naming";
 import { POLYGON_MAX, POLYGON_MIN, isPolygonPattern } from "./polygon";
+import { MM_PER_LENGTH_UNIT } from "./units";
 
 export const MAX_TARGETS = 3;
 
@@ -138,7 +139,9 @@ function findTargets(hass: HomeAssistant, entityIds: string[], devName: string, 
       return (
         id.startsWith("sensor.") &&
         s !== undefined &&
-        s.attributes.unit_of_measurement === "mm" &&
+        // The firmware publishes mm, but HA can show distance sensors in other length units
+        typeof s.attributes.unit_of_measurement === "string" &&
+        Object.hasOwn(MM_PER_LENGTH_UNIT, s.attributes.unit_of_measurement) &&
         s.attributes.device_class === "distance" &&
         s.attributes.icon === icon
       );

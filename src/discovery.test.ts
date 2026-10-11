@@ -237,6 +237,26 @@ describe("discover", () => {
     expect(device.targets[0].name).toBe("Target 1");
   });
 
+  it.each(["cm", "m", "in", "ft", "yd"])("finds target sensors HA shows in %s", (unit) => {
+    const entities = livingRoom().map((e) =>
+      e.attributes?.unit_of_measurement === "mm"
+        ? { ...e, attributes: { ...e.attributes, unit_of_measurement: unit } }
+        : e,
+    );
+    const [device] = discover(mockHass({ dev1: "Living Room" }, entities));
+    expect(device.targets.map((t) => t.x)).toEqual(["sensor.lr_t1_x", "sensor.lr_t2_x"]);
+  });
+
+  it("doesn't take sensors without a length unit for target sensors", () => {
+    const entities = livingRoom().map((e) =>
+      e.attributes?.unit_of_measurement === "mm"
+        ? { ...e, attributes: { ...e.attributes, unit_of_measurement: "mm/s" } }
+        : e,
+    );
+    const [device] = discover(mockHass({ dev1: "Living Room" }, entities));
+    expect(device.targets).toEqual([]);
+  });
+
   it("warns about unpaired target sensors", () => {
     const hass = mockHass({ dev1: "Office" }, [
       zone("text.a", "Office Desk Zone"),
