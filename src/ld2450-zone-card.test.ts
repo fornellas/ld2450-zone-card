@@ -725,7 +725,22 @@ describe("ld2450-zone-card", () => {
 
   it("rejects invalid config", () => {
     const card = document.createElement("ld2450-zone-card") as Ld2450ZoneCard;
-    const config = { type: "custom:ld2450-zone-card", targets: [{ x: "sensor.x" }] };
-    expect(() => card.setConfig(config as Parameters<Ld2450ZoneCard["setConfig"]>[0])).toThrow(/"y"/);
+    const set = (config: Record<string, unknown>) =>
+      card.setConfig({ type: "custom:ld2450-zone-card", ...config } as Parameters<Ld2450ZoneCard["setConfig"]>[0]);
+    expect(() => set({ targets: "sensor.x" })).toThrow(/list/);
+    expect(() => set({ targets: [{ x: "sensor.x", y: 3 }] })).toThrow(/"y"/);
+    expect(() => set({ zones: ["text.couch"] })).toThrow(/mapping/);
+  });
+
+  it("ignores config items the visual editor is still filling in", async () => {
+    const root = await renderCard({ targets: [{ x: "sensor.t1_x" }], zones: [{ polygon: "" }], device_id: "" }, hass());
+    // Auto-detection still finds everything, as if the incomplete items weren't there
+    expect(root.querySelector(".targets")!.textContent).toContain("Target 1");
+    expect([...root.querySelectorAll("select")[0].options].map((o) => o.textContent)).toEqual(["Office"]);
+  });
+
+  it("has a visual editor for every option", () => {
+    const form = (Ld2450ZoneCard as unknown as { getConfigForm(): { schema: { name: string }[] } }).getConfigForm();
+    expect(form.schema.map((f) => f.name)).toEqual(["title", "device_id", "targets", "zones"]);
   });
 });

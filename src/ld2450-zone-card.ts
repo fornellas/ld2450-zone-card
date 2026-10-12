@@ -39,6 +39,7 @@ import {
   toInputValue,
 } from "./units";
 import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import { CONFIG_FORM, configOverrides } from "./config-form";
 import "./mount-editor";
 import "./zone-map";
 import type { DraftChange } from "./zone-map";
@@ -88,15 +89,17 @@ export interface Ld2450ZoneCardConfig extends LovelaceCardConfig, DiscoveryOverr
   title?: string;
 }
 
-function checkEntityList(value: unknown, key: string, fields: string[], required: string[]): void {
-  if (value === undefined) return;
+/** Reject lists of the wrong shape. Missing entities are fine: the visual editor leaves them empty while editing. */
+function checkEntityList(value: unknown, key: string, fields: string[]): void {
+  if (value === undefined || value === null) return;
   if (!Array.isArray(value)) throw new Error(`"${key}" must be a list`);
   for (const item of value) {
     if (typeof item !== "object" || item === null) throw new Error(`Each "${key}" item must be a mapping`);
     for (const field of fields) {
       const v = (item as Record<string, unknown>)[field];
-      if (v === undefined && !required.includes(field)) continue;
-      if (typeof v !== "string") throw new Error(`"${key}" items need "${field}" as an entity ID`);
+      if (v !== undefined && v !== null && typeof v !== "string") {
+        throw new Error(`"${key}" items need "${field}" as an entity ID`);
+      }
     }
   }
 }
@@ -166,17 +169,22 @@ export class Ld2450ZoneCard extends LitElement {
   /** The last position recorded for each target, so a target standing still isn't recorded again and again. */
   private _trailLast: Record<string, Record<string, string>> = {};
 
+  /** The visual editor, built by Home Assistant from this form. */
+  static getConfigForm() {
+    return CONFIG_FORM;
+  }
+
   static getStubConfig(): Partial<Ld2450ZoneCardConfig> {
     return {};
   }
 
   setConfig(config: Ld2450ZoneCardConfig): void {
     if (!config) throw new Error("Invalid configuration");
-    if (config.device_id !== undefined && typeof config.device_id !== "string") {
+    if (config.device_id !== undefined && config.device_id !== null && typeof config.device_id !== "string") {
       throw new Error('"device_id" must be a device ID');
     }
-    checkEntityList(config.targets, "targets", ["x", "y"], ["x", "y"]);
-    checkEntityList(config.zones, "zones", ["polygon", "presence"], ["polygon"]);
+    checkEntityList(config.targets, "targets", ["x", "y"]);
+    checkEntityList(config.zones, "zones", ["polygon", "presence"]);
     this._config = config;
   }
 
@@ -252,7 +260,7 @@ export class Ld2450ZoneCard extends LitElement {
   override render() {
     // Wait for the entity ID format, so device names don't change after the first render
     if (!this._config || !this.hass || !this._entityIdParts?.length) return nothing;
-    const devices = discover(this.hass, this._config, this._entityIdParts);
+    const devices = discover(this.hass, configOverrides(this._config), this._entityIdParts);
     const device = devices.find((d) => d.id === this._deviceId) ?? devices[0];
     return html`
       <ha-card .header=${this._config.title ?? "LD2450 Zones"}>

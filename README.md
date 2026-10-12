@@ -122,7 +122,8 @@ entities. Discovery relies on these defaults:
 Changing an icon, device class or unit in your ESPHome YAML or in Home Assistant hides that entity from discovery.
 Name it in the `targets:` (target X/Y sensors) or `zones:` (presence sensors) option instead.
 
-Every option is optional, and overrides automatic discovery:
+Every option can be set in the card's visual editor, or in YAML. They're all optional, and override automatic
+discovery:
 
 ```yaml
 type: custom:ld2450-zone-card
