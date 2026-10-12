@@ -95,9 +95,75 @@ Add the card to a dashboard from the card picker (**LD2450 Zone Card**), or with
 type: custom:ld2450-zone-card
 ```
 
-The device needs polygon zones in its ESPHome configuration: zones under `text: - platform: ld2450` →
-`polygon_zones`, each with a presence sensor under `binary_sensor: - platform: ld2450` → `polygon_zones`. Show the
-targets with `target_1`…`target_3` `x` and `y` sensors under `sensor: - platform: ld2450`.
+### ESPHome configuration
+
+The device needs polygon zones: a text entity per zone under `text: - platform: ld2450`, each with a presence sensor
+under `binary_sensor: - platform: ld2450`. To show targets, add the `x` and `y` sensors of `target_1`…`target_3`
+under `sensor: - platform: ld2450`. See the
+[polygon zones documentation](https://github.com/esphome/esphome.io/pull/7632) for all options.
+
+A full example, with two zones and three targets:
+
+```yaml
+# Polygon zones aren't in an ESPHome release yet: take the ld2450 component from its pull request
+external_components:
+  - source: github://pr#20154
+    components: [ld2450]
+
+uart:
+  id: uart_ld2450
+  # The LD2450's TX goes to the ESP's RX, and its RX to the ESP's TX. Use your board's pins.
+  tx_pin: GPIO17
+  rx_pin: GPIO16
+  baud_rate: 256000
+  parity: NONE
+  stop_bits: 1
+
+ld2450:
+  id: ld2450_radar
+  uart_id: uart_ld2450
+
+# One text entity per zone, holding its polygon. The card draws and saves them.
+text:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    polygon_zones:
+      - id: couch_zone
+        name: Couch Zone Polygon
+      - id: desk_zone
+        name: Desk Zone Polygon
+
+# One presence sensor per zone. "<zone name> Occupied" pairs with its zone in the card automatically.
+binary_sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    polygon_zones:
+      - polygon_zone_id: couch_zone
+        name: Couch Occupied
+      - polygon_zone_id: desk_zone
+        name: Desk Occupied
+
+# Target positions, drawn live on the card's map. Keep their default icons and units, so the card finds them, and
+# don't add filters that change their values.
+sensor:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    target_1:
+      x:
+        name: Target-1 X
+      y:
+        name: Target-1 Y
+    target_2:
+      x:
+        name: Target-2 X
+      y:
+        name: Target-2 Y
+    target_3:
+      x:
+        name: Target-3 X
+      y:
+        name: Target-3 Y
+```
 
 Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch Occupied`) and the card pairs them
 automatically. Other names are paired by the words they share, and a zone that matches more than one sensor equally
