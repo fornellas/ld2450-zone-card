@@ -15,7 +15,7 @@ const LABELS: Record<string, string> = {
 };
 
 const HELPERS: Record<string, string> = {
-  device_id: "Only show this LD2450. Leave empty to choose any device from the card.",
+  device_id: "Leave empty to auto-discover all LD2450 devices and select them from the card.",
   targets:
     "The X and Y sensors of each target. Leave empty to find them automatically, from their default icons and names.",
   zones:
