@@ -209,9 +209,9 @@ export class Ld2450ZoneMap extends LitElement {
             : nothing
         }
         ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
-        ${this._renderZones(font)} ${this._renderRadar()} ${this._renderTrail(font)}
-        ${this._shown("targets") ? this._renderTargets(font) : nothing}
-        ${this._editorShown ? this._renderEditor(font) : nothing}
+        ${this._renderZones(font)} ${this._editorShown ? this._renderEditor(font) : nothing} ${this._renderRadar()}
+        <!-- The trail and targets go last, so nothing tints them. They let clicks through to the point handles. -->
+        ${this._renderTrail(font)} ${this._shown("targets") ? this._renderTargets(font) : nothing}
       </svg>
       <div class="legend">
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
@@ -646,6 +646,10 @@ export class Ld2450ZoneMap extends LitElement {
     .zone.selected text {
       fill: var(--primary-text-color);
       font-weight: 500;
+    }
+    .trail,
+    .target {
+      pointer-events: none;
     }
     .trail circle {
       fill: none;

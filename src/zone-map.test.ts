@@ -141,3 +141,33 @@ describe("ld2450-zone-map fitting targets and trail", () => {
     expect(shown).toBeGreaterThan(hidden);
   });
 });
+
+describe("ld2450-zone-map drawing order", () => {
+  it("draws the trail and targets above everything else, without taking clicks", async () => {
+    const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+    const zone = [
+      { x: -500, y: 1000 },
+      { x: 500, y: 1000 },
+      { x: 500, y: 2000 },
+    ];
+    map.editable = true;
+    map.draft = zone;
+    map.zones = [{ name: "Couch", points: zone, selected: true, occupied: true }];
+    map.targets = [{ label: "1", name: "Target 1", point: { x: 0, y: 1500 } }];
+    map.trail = [{ x: 100, y: 1500 }];
+    map.trailShown = true;
+    document.body.appendChild(map);
+    await map.updateComplete;
+    const root = map.shadowRoot!;
+    const order = [...root.querySelector("svg")!.children].map((el) => el.getAttribute("class") ?? el.tagName);
+    const index = (cls: string) => order.findIndex((c) => c.split(" ").includes(cls));
+    // Above the edited zone, its handles, and the radar
+    for (const above of ["zone", "vertex", "radar"]) {
+      expect(index("trail")).toBeGreaterThan(index(above));
+      expect(index("target")).toBeGreaterThan(index(above));
+    }
+    expect(index("target")).toBeGreaterThan(index("trail"));
+    expect(index("target")).toBe(order.length - 1);
+    expect(getComputedStyle(root.querySelector(".target")!).pointerEvents).toBe("none");
+  });
+});
