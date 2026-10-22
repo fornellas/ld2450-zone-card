@@ -15,7 +15,15 @@ export interface SystemSettings {
    * it moves with the radar's position settings. v0.0.14 stored a plain list in room coordinates.
    */
   floorPlans?: Record<string, { points: Point[] } | Point[]>;
+  /** How often each device's target X/Y sensors update in Home Assistant, in seconds, by device ID. */
+  updateIntervals?: Record<string, number>;
 }
+
+/** Until set: ESPHome's default filters let each target X/Y sensor through about once a second. */
+export const DEFAULT_UPDATE_INTERVAL = 1;
+/** The radar sends 10 frames a second, so sensors can't update faster than this. */
+export const MIN_UPDATE_INTERVAL = 0.1;
+export const MAX_UPDATE_INTERVAL = 10;
 
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const isPoint = (v: unknown): v is Point =>
@@ -34,6 +42,16 @@ export function deviceMount(settings: SystemSettings | undefined, deviceId: stri
 
 export function withDeviceMount(settings: SystemSettings, deviceId: string, mount: Mount): SystemSettings {
   return { ...settings, mounts: { ...settings.mounts, [deviceId]: mount } };
+}
+
+/** How often the device's target X/Y sensors update, in seconds, or the default when it's missing or malformed. */
+export function deviceUpdateInterval(settings: SystemSettings | undefined, deviceId: string): number {
+  const v = settings?.updateIntervals?.[deviceId];
+  return isNumber(v) && v >= MIN_UPDATE_INTERVAL && v <= MAX_UPDATE_INTERVAL ? v : DEFAULT_UPDATE_INTERVAL;
+}
+
+export function withUpdateInterval(settings: SystemSettings, deviceId: string, seconds: number): SystemSettings {
+  return { ...settings, updateIntervals: { ...settings.updateIntervals, [deviceId]: seconds } };
 }
 
 /** The device's floor plan in radar coordinates, or none when it's missing or malformed. */

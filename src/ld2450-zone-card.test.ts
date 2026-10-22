@@ -541,15 +541,22 @@ describe("ld2450-zone-card", () => {
         await map.updateComplete;
       };
       const circles = () => map.shadowRoot!.querySelectorAll(".trail circle").length;
-      let clock = Date.parse("2026-10-11T12:00:00Z");
-      /** Move target 1, X and Y updated together as one radar frame, unless yLag (ms) delays Y. */
-      const move = async (x: number, y: number, yLag = 0) => {
-        clock += 1000;
+      /** Update target 1's sensors in Home Assistant: both, or just one axis. */
+      const set = async (values: { x?: number; y?: number }) => {
         const states = { ...card.hass!.states };
-        const at = (ms: number) => new Date(ms).toISOString();
-        states["sensor.t1_x"] = { ...states["sensor.t1_x"], state: String(x), last_updated: at(clock) };
-        states["sensor.t1_y"] = { ...states["sensor.t1_y"], state: String(y), last_updated: at(clock + yLag) };
+        for (const axis of ["x", "y"] as const) {
+          const value = values[axis];
+          if (value !== undefined)
+            states[`sensor.t1_${axis}`] = { ...states[`sensor.t1_${axis}`], state: String(value) };
+        }
         card.hass = { ...card.hass!, states };
+        await update();
+      };
+      /** Move target 1, X and Y updating together. */
+      const move = (x: number, y: number) => set({ x, y });
+      /** Wait for real time to pass, as the card's timers use it. */
+      const wait = async (ms: number) => {
+        await new Promise((resolve) => setTimeout(resolve, ms));
         await update();
       };
       const toggle = async (on: boolean) => {
@@ -559,7 +566,7 @@ describe("ld2450-zone-card", () => {
         await update();
       };
       await update();
-      return { root, map, circles, move, toggle, update };
+      return { root, map, circles, move, set, wait, toggle, update };
     }
 
     it("fits the zone around the trail, as an edit that can be undone", async () => {
@@ -615,15 +622,32 @@ describe("ld2450-zone-card", () => {
       expect(circles()).toBe(2);
     });
 
-    it("only records positions whose X and Y were updated together", async () => {
-      const { circles, move, toggle } = await withTrail();
+    it("waits for the other axis before recording, for about the update interval", async () => {
+      const { root, circles, move, set, wait, toggle, update } = await withTrail();
+      // A 0.1 s interval makes the wait 120 ms
+      const input = root.querySelector<HTMLInputElement>(".targets .interval input")!;
+      input.value = "0.1";
+      input.dispatchEvent(new Event("input"));
+      await update();
       await toggle(true);
       await move(100, 1000);
-      // Y from a later radar frame than X: not a real position
-      await move(900, 3000, 300);
       expect(circles()).toBe(1);
-      await move(900, 3000);
+
+      // X alone isn't recorded; Y within the wait completes the pair
+      await set({ x: 300 });
+      expect(circles()).toBe(1);
+      await set({ y: 1400 });
       expect(circles()).toBe(2);
+      await wait(200);
+      expect(circles()).toBe(2);
+
+      // X alone, and Y never comes: recorded with Y's current value once the wait is over
+      await set({ x: 500 });
+      expect(circles()).toBe(2);
+      await wait(200);
+      expect(circles()).toBe(3);
+      // Let the interval finish saving, so it doesn't land in another test
+      await wait(500);
     });
 
     it("clears with the button, and when turned off", async () => {
@@ -633,15 +657,61 @@ describe("ld2450-zone-card", () => {
       (root.querySelector(".trail button.clear") as HTMLButtonElement).click();
       await update();
       expect(circles()).toBe(0);
-      await move(200, 1000);
+      await move(200, 1100);
       expect(circles()).toBe(1);
       await toggle(false);
       expect(circles()).toBe(0);
       // Turned on again, it starts afresh with the next position
       await toggle(true);
       expect(circles()).toBe(0);
-      await move(300, 1000);
+      await move(300, 1200);
       expect(circles()).toBe(1);
+    });
+  });
+
+  describe("update interval", () => {
+    const input = (root: ShadowRoot) => root.querySelector<HTMLInputElement>(".targets .interval input")!;
+    const type = async (root: ShadowRoot, value: string) => {
+      input(root).value = value;
+      input(root).dispatchEvent(new Event("input"));
+      await (root.host as Ld2450ZoneCard).updateComplete;
+    };
+
+    it("sits next to the targets, under the legend, and is 1 s by default", async () => {
+      const root = await renderCard({}, hass());
+      const targets = root.querySelector(".targets")!;
+      expect([...targets.children].map((c) => c.className)).toEqual(["target-list", "inline interval"]);
+      expect(targets.textContent).toContain("Target 1");
+      expect(targets.querySelector("label")!.textContent).toContain("Update interval (s)");
+      expect(input(root).value).toBe("1");
+    });
+
+    it("is saved for the device, for everyone, once typing settles", async () => {
+      const root = await renderCard({}, hass());
+      await type(root, "0.5");
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      const saved = calls.filter((c) => c.type === "frontend/set_system_data");
+      expect(saved).toHaveLength(1);
+      expect(saved[0].value).toMatchObject({ updateIntervals: { dev1: 0.5 } });
+    });
+
+    it.each(["", "0.05", "11", "abc"])("ignores %s", async (value) => {
+      const root = await renderCard({}, hass());
+      await type(root, value);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(calls.filter((c) => c.type === "frontend/set_system_data")).toEqual([]);
+    });
+
+    it("shows the saved interval", async () => {
+      const h = hass();
+      systemData = { updateIntervals: { dev1: 2 } };
+      expect(input(await renderCard({}, h)).value).toBe("2");
+    });
+
+    it("can only be changed by administrators", async () => {
+      const root = await renderCard({}, { ...hass(), user: { is_admin: false } });
+      expect(input(root).disabled).toBe(true);
+      expect(root.querySelector(".targets .interval")!.getAttribute("title")).toContain("Only administrators");
     });
   });
 

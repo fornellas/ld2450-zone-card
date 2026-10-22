@@ -27,7 +27,8 @@ evaluated on the device.
 - **Floor plan:** an outline of the room you draw yourself.
 - **Zones:** the selected zone is highlighted, the others are dashed, and occupied zones (from their presence
   sensors) are filled.
-- **Targets:** live positions of up to three people, also listed under the map.
+- **Targets:** live positions of up to three people, also listed under the map, with an **Update interval** field
+  (see [Target update interval](#target-update-interval)).
 - **Toggle anything** by clicking it in the legend: tracking range, floor plan, selected zone, occupied and targets.
   The choice is saved per user.
 - **Fits what's shown:** the map zooms to the visible items, targets and trail.
@@ -49,9 +50,8 @@ evaluated on the device.
 ### Trail and automatic zones
 
 - **Trail:** while on, every position where a target is seen is kept (the last 7,000 per device) and drawn on the map,
-  so you can see where people actually walk, sit or stand. It's off on every page load. It only records positions
-  whose X and Y were updated together, from the same radar frame, so it doesn't mix the X of one moment with the Y
-  of another.
+  so you can see where people actually walk, sit or stand. It's off on every page load. It records the same
+  positions as the map shows.
 - **Fit zone to trail:** turns the trail into a zone around all its points, keeping a margin you choose to each. It's
   a normal edit, so it can be undone and adjusted before saving.
 
@@ -144,7 +144,8 @@ binary_sensor:
         name: Desk Occupied
 
 # Target positions, drawn live on the card's map. Keep their default icons and units, so the card finds them, and
-# don't add filters that change their values.
+# don't add filters that change their values. Their default filters let each one through about once a second: if you
+# change that throttle, set the card's "Update interval" to match.
 sensor:
   - platform: ld2450
     ld2450_id: ld2450_radar
@@ -172,6 +173,19 @@ well is left for you to pair in the [configuration](#configuration).
 Zones are checked on the device in the radar's own coordinates, and target sensors are drawn on the same map, so don't
 change their values with filters (for example multiplying X by -1 for an upside down radar). Use the card's **Upside
 down** option instead.
+
+### Target update interval
+
+The radar sends 10 frames a second, but ESPHome's default filters on the target X and Y sensors only let each one
+through about once a second, separately, and only when its value changed. So Home Assistant gets X and Y at different
+moments, and drawing the latest of each would mix two moments.
+
+When one updates, the card waits a little for the other: if it updates, the target moves to the new X and Y; if not,
+it moves with the other's current value. The wait is 1.2 times the **Update interval**, in seconds, which you set in
+the field to the right of the targets, under the map: the throttle you configured on the target X/Y sensors in
+ESPHome. It's 1 s by default, to match ESPHome's defaults. If you remove the filters (`filters: []`) the sensors
+update together, up to 10 times a second, so set it to 0.1 and positions are exact; this sends more state updates to
+Home Assistant. The setting is kept for each device, for all users, and only administrators can change it.
 
 ### Configuration
 
