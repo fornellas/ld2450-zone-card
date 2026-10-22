@@ -62,23 +62,3 @@ export function toInputValue(mm: number, units: Units): number {
 export function fromInputValue(value: number, units: Units): number {
   return Math.round(units === "metric" ? value * 1000 : value * MM_PER_FOOT);
 }
-
-/**
- * Millimetres in each length unit Home Assistant can show a distance sensor in. The firmware publishes target X/Y in
- * mm, but users can change a sensor's display unit, and US customary installs may show them in inches.
- */
-export const MM_PER_LENGTH_UNIT: Readonly<Record<string, number>> = {
-  mm: 1,
-  cm: 10,
-  m: 1000,
-  in: 25.4,
-  ft: MM_PER_FOOT,
-  yd: 3 * MM_PER_FOOT,
-};
-
-/** A length in the given unit, in mm. Undefined for units that aren't lengths, or no unit. */
-export function toMillimetres(value: number, unit: unknown): number | undefined {
-  const factor =
-    typeof unit === "string" && Object.hasOwn(MM_PER_LENGTH_UNIT, unit) ? MM_PER_LENGTH_UNIT[unit] : undefined;
-  return factor === undefined ? undefined : value * factor;
-}

@@ -24,18 +24,7 @@ function hass(): HomeAssistant {
   add("text.couch", "0,0;1000,0;1000,600", { ...polygon, friendly_name: "Office Couch Zone" });
   add("text.desk", "", { ...polygon, friendly_name: "Office Desk Zone" });
   add("binary_sensor.couch", "on", { friendly_name: "Office Couch Occupied", device_class: "occupancy" });
-  add("sensor.t1_x", "-782", {
-    friendly_name: "Office Target 1 X",
-    unit_of_measurement: "mm",
-    device_class: "distance",
-    icon: "mdi:alpha-x-box-outline",
-  });
-  add("sensor.t1_y", "1713", {
-    friendly_name: "Office Target 1 Y",
-    unit_of_measurement: "mm",
-    device_class: "distance",
-    icon: "mdi:alpha-y-box-outline",
-  });
+  add("sensor.t1_xy", "-782,1713", { friendly_name: "Office Target 1 XY", icon: "mdi:crosshairs-gps" });
   return {
     states,
     entities,
@@ -415,7 +404,7 @@ describe("ld2450-zone-card", () => {
 
   it("shows when the device is offline", async () => {
     const h = hass();
-    for (const id of ["text.couch", "text.desk", "sensor.t1_x", "sensor.t1_y"]) {
+    for (const id of ["text.couch", "text.desk", "sensor.t1_xy"]) {
       h.states[id] = { ...h.states[id], state: "unavailable" };
     }
     const root = await renderCard({}, h);
@@ -541,24 +530,15 @@ describe("ld2450-zone-card", () => {
         await map.updateComplete;
       };
       const circles = () => map.shadowRoot!.querySelectorAll(".trail circle").length;
-      /** Update target 1's sensors in Home Assistant: both, or just one axis. */
-      const set = async (values: { x?: number; y?: number }) => {
+      /** Set what target 1's xy text sensor says in Home Assistant. */
+      const setState = async (state: string) => {
         const states = { ...card.hass!.states };
-        for (const axis of ["x", "y"] as const) {
-          const value = values[axis];
-          if (value !== undefined)
-            states[`sensor.t1_${axis}`] = { ...states[`sensor.t1_${axis}`], state: String(value) };
-        }
+        states["sensor.t1_xy"] = { ...states["sensor.t1_xy"], state };
         card.hass = { ...card.hass!, states };
         await update();
       };
-      /** Move target 1, X and Y updating together. */
-      const move = (x: number, y: number) => set({ x, y });
-      /** Wait for real time to pass, as the card's timers use it. */
-      const wait = async (ms: number) => {
-        await new Promise((resolve) => setTimeout(resolve, ms));
-        await update();
-      };
+      const move = (x: number, y: number) => setState(`${x},${y}`);
+      const idle = () => setState("NA");
       const toggle = async (on: boolean) => {
         const input = root.querySelector<HTMLInputElement>(".trail input")!;
         input.checked = on;
@@ -566,7 +546,9 @@ describe("ld2450-zone-card", () => {
         await update();
       };
       await update();
-      return { root, map, circles, move, set, wait, toggle, update };
+      // Start without a target, so the trail begins empty
+      await idle();
+      return { root, map, circles, move, idle, toggle, update };
     }
 
     it("fits the zone around the trail, as an edit that can be undone", async () => {
@@ -622,32 +604,16 @@ describe("ld2450-zone-card", () => {
       expect(circles()).toBe(2);
     });
 
-    it("waits for the other axis before recording, for about the update interval", async () => {
-      const { root, circles, move, set, wait, toggle, update } = await withTrail();
-      // A 0.1 s interval makes the wait 120 ms
-      const input = root.querySelector<HTMLInputElement>(".targets .interval input")!;
-      input.value = "0.1";
-      input.dispatchEvent(new Event("input"));
-      await update();
+    it("records each position the sensor publishes, and nothing without a target", async () => {
+      const { circles, move, idle, toggle } = await withTrail();
       await toggle(true);
       await move(100, 1000);
-      expect(circles()).toBe(1);
-
-      // X alone isn't recorded; Y within the wait completes the pair
-      await set({ x: 300 });
-      expect(circles()).toBe(1);
-      await set({ y: 1400 });
+      await move(300, 1400);
       expect(circles()).toBe(2);
-      await wait(200);
+      await idle();
       expect(circles()).toBe(2);
-
-      // X alone, and Y never comes: recorded with Y's current value once the wait is over
-      await set({ x: 500 });
-      expect(circles()).toBe(2);
-      await wait(200);
+      await move(500, 1800);
       expect(circles()).toBe(3);
-      // Let the interval finish saving, so it doesn't land in another test
-      await wait(500);
     });
 
     it("clears with the button, and when turned off", async () => {
@@ -661,57 +627,11 @@ describe("ld2450-zone-card", () => {
       expect(circles()).toBe(1);
       await toggle(false);
       expect(circles()).toBe(0);
-      // Turned on again, it starts afresh with the next position
+      // Turned on again, it starts afresh from where the target is now
       await toggle(true);
-      expect(circles()).toBe(0);
-      await move(300, 1200);
       expect(circles()).toBe(1);
-    });
-  });
-
-  describe("update interval", () => {
-    const input = (root: ShadowRoot) => root.querySelector<HTMLInputElement>(".targets .interval input")!;
-    const type = async (root: ShadowRoot, value: string) => {
-      input(root).value = value;
-      input(root).dispatchEvent(new Event("input"));
-      await (root.host as Ld2450ZoneCard).updateComplete;
-    };
-
-    it("sits next to the targets, under the legend, and is 1 s by default", async () => {
-      const root = await renderCard({}, hass());
-      const targets = root.querySelector(".targets")!;
-      expect([...targets.children].map((c) => c.className)).toEqual(["target-list", "inline interval"]);
-      expect(targets.textContent).toContain("Target 1");
-      expect(targets.querySelector("label")!.textContent).toContain("Update interval (s)");
-      expect(input(root).value).toBe("1");
-    });
-
-    it("is saved for the device, for everyone, once typing settles", async () => {
-      const root = await renderCard({}, hass());
-      await type(root, "0.5");
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      const saved = calls.filter((c) => c.type === "frontend/set_system_data");
-      expect(saved).toHaveLength(1);
-      expect(saved[0].value).toMatchObject({ updateIntervals: { dev1: 0.5 } });
-    });
-
-    it.each(["", "0.05", "11", "abc"])("ignores %s", async (value) => {
-      const root = await renderCard({}, hass());
-      await type(root, value);
-      await new Promise((resolve) => setTimeout(resolve, 600));
-      expect(calls.filter((c) => c.type === "frontend/set_system_data")).toEqual([]);
-    });
-
-    it("shows the saved interval", async () => {
-      const h = hass();
-      systemData = { updateIntervals: { dev1: 2 } };
-      expect(input(await renderCard({}, h)).value).toBe("2");
-    });
-
-    it("can only be changed by administrators", async () => {
-      const root = await renderCard({}, { ...hass(), user: { is_admin: false } });
-      expect(input(root).disabled).toBe(true);
-      expect(root.querySelector(".targets .interval")!.getAttribute("title")).toContain("Only administrators");
+      await move(300, 1200);
+      expect(circles()).toBe(2);
     });
   });
 
@@ -798,12 +718,14 @@ describe("ld2450-zone-card", () => {
     const set = (config: Record<string, unknown>) =>
       card.setConfig({ type: "custom:ld2450-zone-card", ...config } as Parameters<Ld2450ZoneCard["setConfig"]>[0]);
     expect(() => set({ targets: "sensor.x" })).toThrow(/list/);
-    expect(() => set({ targets: [{ x: "sensor.x", y: 3 }] })).toThrow(/"y"/);
+    expect(() => set({ targets: [{ xy: 3 }] })).toThrow(/"xy"/);
+    // The x and y sensors of earlier versions are replaced by the xy text sensor
+    expect(() => set({ targets: [{ x: "sensor.x", y: "sensor.y" }] })).toThrow(/"xy" text sensor now/);
     expect(() => set({ zones: ["text.couch"] })).toThrow(/mapping/);
   });
 
   it("ignores config items the visual editor is still filling in", async () => {
-    const root = await renderCard({ targets: [{ x: "sensor.t1_x" }], zones: [{ polygon: "" }], device_id: "" }, hass());
+    const root = await renderCard({ targets: [{ xy: "" }], zones: [{ polygon: "" }], device_id: "" }, hass());
     // Auto-detection still finds everything, as if the incomplete items weren't there
     expect(root.querySelector(".targets")!.textContent).toContain("Target 1");
     expect([...root.querySelectorAll("select")[0].options].map((o) => o.textContent)).toEqual(["Office"]);

@@ -14,19 +14,15 @@ import {
   formatPolygon,
   parsePolygon,
 } from "./polygon";
-import { type TargetPosition, TargetTracker } from "./targets";
+import { type TargetPosition, readTargets } from "./targets";
 import {
-  MAX_UPDATE_INTERVAL,
-  MIN_UPDATE_INTERVAL,
   type SystemSettings,
   deviceFloorPlan,
   deviceMount,
-  deviceUpdateInterval,
   saveSystemSettings,
   subscribeSystemSettings,
   withDeviceMount,
   withFloorPlan,
-  withUpdateInterval,
 } from "./system-settings";
 import { type Mount, toRadar, toRoom } from "./transform";
 import {
@@ -108,6 +104,15 @@ function checkEntityList(value: unknown, key: string, fields: string[]): void {
   }
 }
 
+/** The targets option takes the xy text sensor of each target. */
+function checkTargets(value: unknown): void {
+  checkEntityList(value, "targets", ["xy"]);
+  const old = (Array.isArray(value) ? value : []).find((item) => "x" in item || "y" in item);
+  if (old !== undefined) {
+    throw new Error('"targets" items take the "xy" text sensor now, instead of "x" and "y": replace them with it');
+  }
+}
+
 export class Ld2450ZoneCard extends LitElement {
   static override properties = {
     hass: { attribute: false },
@@ -118,8 +123,6 @@ export class Ld2450ZoneCard extends LitElement {
     _userSettings: { state: true },
     _systemSettings: { state: true },
     _mountError: { state: true },
-    _intervalError: { state: true },
-    _intervalText: { state: true },
     _snapText: { state: true },
     _saving: { state: true },
     _saveResult: { state: true },
@@ -141,9 +144,6 @@ export class Ld2450ZoneCard extends LitElement {
   private _unsubscribeSystem?: Promise<() => void>;
   private _saveTimer?: ReturnType<typeof setTimeout>;
   private _mountError?: string;
-  private _intervalError?: string;
-  /** The update interval while the user is typing it. */
-  private _intervalText?: string;
   /** The snap step while the user is typing it. */
   private _snapText?: string;
   private _snapSaveTimer?: ReturnType<typeof setTimeout>;
@@ -166,8 +166,6 @@ export class Ld2450ZoneCard extends LitElement {
   private _currentTarget?: Target;
   /** The device shown. */
   private _currentDevice?: string;
-  /** Pairs target X and Y from the same radar frame. */
-  private _tracker = new TargetTracker(() => this.requestUpdate());
   /** Whether the trail is on. Off on every load. */
   private _trailOn = false;
   /** The trail margin while the user is typing it. */
@@ -192,7 +190,7 @@ export class Ld2450ZoneCard extends LitElement {
     if (config.device_id !== undefined && config.device_id !== null && typeof config.device_id !== "string") {
       throw new Error('"device_id" must be a device ID');
     }
-    checkEntityList(config.targets, "targets", ["x", "y"]);
+    checkTargets(config.targets);
     checkEntityList(config.zones, "zones", ["polygon", "presence"]);
     this._config = config;
   }
@@ -240,47 +238,19 @@ export class Ld2450ZoneCard extends LitElement {
     this._unsubscribeSystem?.then((unsubscribe) => unsubscribe()).catch(() => undefined);
     this._unsubscribeSystem = undefined;
     clearTimeout(this._savingTimer);
-    this._tracker.dispose();
   }
 
-  /** Change the shared settings, and save them once edits settle. Errors go to the field named by errorField. */
-  private _changeSystemSettings(
-    change: (settings: SystemSettings) => SystemSettings,
-    what: string,
-    errorField: "_mountError" | "_intervalError",
-  ): void {
-    this._systemSettings = change(this._systemSettings ?? {});
-    this[errorField] = undefined;
+  private _mountChanged(deviceId: string, mount: Mount): void {
+    this._systemSettings = withDeviceMount(this._systemSettings ?? {}, deviceId, mount);
+    this._mountError = undefined;
     clearTimeout(this._saveTimer);
     // Typing in a number field fires a change per step; save once it settles
     this._saveTimer = setTimeout(() => {
       this._saveTimer = undefined;
       saveSystemSettings(this.hass!, this._systemSettings!).catch((err) => {
-        this[errorField] = `Could not save the ${what}: ${err?.message ?? err}`;
+        this._mountError = `Could not save the radar position: ${err?.message ?? err}`;
       });
     }, SAVE_DELAY_MS);
-  }
-
-  private _mountChanged(deviceId: string, mount: Mount): void {
-    this._changeSystemSettings(
-      (settings) => withDeviceMount(settings, deviceId, mount),
-      "radar position",
-      "_mountError",
-    );
-  }
-
-  /** Typing the update interval: it applies as soon as it's a valid number of seconds. */
-  private _intervalInput(deviceId: string, ev: Event): void {
-    const text = (ev.target as HTMLInputElement).value;
-    const seconds = Number(text);
-    if (text.trim() === "" || !Number.isFinite(seconds)) return;
-    if (seconds < MIN_UPDATE_INTERVAL || seconds > MAX_UPDATE_INTERVAL) return;
-    this._intervalText = text;
-    this._changeSystemSettings(
-      (settings) => withUpdateInterval(settings, deviceId, seconds),
-      "update interval",
-      "_intervalError",
-    );
   }
 
   private get _units(): Units {
@@ -333,14 +303,8 @@ export class Ld2450ZoneCard extends LitElement {
     this._currentDevice = device.id;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);
     const offline = this._isOffline(device);
-    // X and Y update separately, so the tracker waits about one update interval for the other axis. The map shows the
-    // positions it settles on, and the trail records each new one.
-    const { positions: targets, fresh } = this._tracker.read(
-      this.hass!,
-      device.targets,
-      deviceUpdateInterval(this._systemSettings, device.id),
-    );
-    if (this._trailOn) this._recordTrail(device.id, fresh);
+    const targets = readTargets(this.hass!, device.targets);
+    if (this._trailOn) this._recordTrail(device.id, targets);
     return html`
       <div class="selectors">
         <label>
@@ -408,7 +372,7 @@ export class Ld2450ZoneCard extends LitElement {
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
-      ${this._renderTargetPositions(device.id, targets, mount, offline)}
+      ${this._renderTargetPositions(targets, mount, offline)}
       ${
         target === undefined || editing === undefined
           ? nothing
@@ -462,45 +426,25 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   /** Where the targets are now, in room coordinates. */
-  private _renderTargetPositions(deviceId: string, targets: TargetPosition[], mount: Mount, offline: boolean) {
-    const help =
-      "How often the target X and Y sensors update in Home Assistant: the throttle set in ESPHome, 1 s by default " +
-      "(0.1 without a throttle). The card waits about this long for the other axis, to pair X and Y.";
-    const editable = this._isAdmin && this._systemSettings !== undefined;
+  private _renderTargetPositions(targets: TargetPosition[], mount: Mount, offline: boolean) {
     return html`
       <section class="targets">
-        <div class="target-list">
-          ${
-            targets.length === 0
-              ? html`<p class="none">${offline ? "Radar offline" : "No targets tracked"}</p>`
-              : html`<ul>
-                  ${targets.map((t) => {
-                    const p = toRoom(t.point, mount);
-                    return html`<li>
-                      <span class="name">Target ${t.label}</span>
-                      <span class="position">
-                        x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
-                      </span>
-                    </li>`;
-                  })}
-                </ul>`
-          }
-        </div>
-        <label class="inline interval" title=${editable ? help : `${help} Only administrators can change it.`}>
-          Update interval (s)
-          <input
-            type="number"
-            min=${MIN_UPDATE_INTERVAL}
-            max=${MAX_UPDATE_INTERVAL}
-            step="0.1"
-            .value=${this._intervalText ?? String(deviceUpdateInterval(this._systemSettings, deviceId))}
-            ?disabled=${!editable}
-            @input=${(ev: Event) => this._intervalInput(deviceId, ev)}
-            @change=${() => (this._intervalText = undefined)}
-          />
-        </label>
+        ${
+          targets.length === 0
+            ? html`<p class="none">${offline ? "Radar offline" : "No targets tracked"}</p>`
+            : html`<ul>
+                ${targets.map((t) => {
+                  const p = toRoom(t.point, mount);
+                  return html`<li>
+                    <span class="name">Target ${t.label}</span>
+                    <span class="position">
+                      x ${formatLength(p.x, this._units)}, y ${formatLength(p.y, this._units)}
+                    </span>
+                  </li>`;
+                })}
+              </ul>`
+        }
       </section>
-      ${this._intervalError === undefined ? nothing : html`<p class="error">${this._intervalError}</p>`}
     `;
   }
 
@@ -1068,16 +1012,11 @@ export class Ld2450ZoneCard extends LitElement {
 
   private _renderTargets(device: Ld2450Device) {
     if (device.targets.length === 0) return nothing;
-    const value = (entityId: string) => this.hass!.states[entityId]?.state ?? "unavailable";
     return html`
       <dl>
         <dt>Targets</dt>
         ${device.targets.map(
-          (t) =>
-            html`<dd>
-              ${t.name}: x=${value(t.x)}, y=${value(t.y)} <code>${t.x}</code>
-              <code>${t.y}</code>
-            </dd>`,
+          (t) => html`<dd>${t.name}: ${this.hass!.states[t.xy]?.state ?? "unavailable"} <code>${t.xy}</code></dd>`,
         )}
       </dl>
     `;
@@ -1105,20 +1044,10 @@ export class Ld2450ZoneCard extends LitElement {
       font-size: 1em;
       font-weight: 500;
     }
-    .targets {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 4px 16px;
-    }
-    .targets label.interval {
-      margin-left: auto;
-    }
     .targets ul {
       display: flex;
-      flex-direction: column;
-      gap: 2px;
+      flex-wrap: wrap;
+      gap: 4px 16px;
       margin: 0;
       padding: 0;
       list-style: none;
@@ -1183,7 +1112,6 @@ export class Ld2450ZoneCard extends LitElement {
       cursor: default;
     }
     .point input,
-    .targets input,
     .trail input[type="number"] {
       padding: 4px 8px;
       font: inherit;

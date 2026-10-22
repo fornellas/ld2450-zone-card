@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_UPDATE_INTERVAL,
-  deviceFloorPlan,
-  deviceMount,
-  deviceUpdateInterval,
-  withDeviceMount,
-  withFloorPlan,
-  withUpdateInterval,
-} from "./system-settings";
+import { deviceFloorPlan, deviceMount, withDeviceMount, withFloorPlan } from "./system-settings";
 import { DEFAULT_MOUNT } from "./transform";
 
 describe("system settings", () => {
@@ -56,17 +48,6 @@ describe("system settings", () => {
     const mount = { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } };
     const settings = { mounts: { dev1: mount }, floorPlans: { dev1: [{ x: 1000, y: 500 }] } };
     expect(deviceFloorPlan(settings, "dev1")).toEqual([{ x: 0, y: 500 }]);
-  });
-
-  it("reads and sets a device's update interval", () => {
-    const settings = withUpdateInterval(withUpdateInterval({}, "dev1", 0.5), "dev2", 2);
-    expect(settings.updateIntervals).toEqual({ dev1: 0.5, dev2: 2 });
-    expect(deviceUpdateInterval(settings, "dev1")).toBe(0.5);
-    expect(deviceUpdateInterval(settings, "dev3")).toBe(DEFAULT_UPDATE_INTERVAL);
-  });
-
-  it.each([0, 0.05, 11, -1, "1", null, Number.NaN])("defaults when the update interval is %s", (value) => {
-    expect(deviceUpdateInterval({ updateIntervals: { dev1: value as never } }, "dev1")).toBe(DEFAULT_UPDATE_INTERVAL);
   });
 
   it("sets a device's mount without touching others", () => {

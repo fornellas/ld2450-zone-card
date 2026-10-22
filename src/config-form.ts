@@ -10,14 +10,14 @@ interface FormField {
 const LABELS: Record<string, string> = {
   title: "Title",
   device_id: "Device",
-  targets: "Target sensors",
+  targets: "Target XY sensors",
   zones: "Zones",
 };
 
 const HELPERS: Record<string, string> = {
   device_id: "Leave empty to auto-discover all LD2450 devices and select them from the card.",
   targets:
-    "The X and Y sensors of each target. Leave empty to find them automatically, from their default icons and names.",
+    "The xy text sensor of each target. Leave empty to find them automatically, from their default icon and state.",
   zones:
     "Pair a zone with its presence sensor. Leave empty to pair them automatically, by name " +
     '(for example "Couch" and "Couch Occupied").',
@@ -34,11 +34,9 @@ export const CONFIG_FORM = {
       selector: {
         object: {
           multiple: true,
-          label_field: "x",
-          description_field: "y",
+          label_field: "xy",
           fields: {
-            x: { label: "X sensor", required: true, selector: entity("sensor") },
-            y: { label: "Y sensor", required: true, selector: entity("sensor") },
+            xy: { label: "XY text sensor", required: true, selector: entity("sensor") },
           },
         },
       },
@@ -71,7 +69,7 @@ const isEntityId = (v: unknown): v is string => typeof v === "string" && v.trim(
 export function configOverrides(config: DiscoveryOverrides): DiscoveryOverrides {
   return {
     device_id: isEntityId(config.device_id) ? config.device_id : undefined,
-    targets: config.targets?.filter((t) => isEntityId(t.x) && isEntityId(t.y)),
+    targets: config.targets?.filter((t) => isEntityId(t.xy)).map((t) => ({ xy: t.xy })),
     zones: config.zones
       ?.filter((z) => isEntityId(z.polygon))
       .map((z) => ({ polygon: z.polygon, presence: isEntityId(z.presence) ? z.presence : undefined })),

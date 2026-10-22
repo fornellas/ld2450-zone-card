@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { discover, stripAxis } from "./discovery";
+import { discover, stripWord } from "./discovery";
 import type { HomeAssistant } from "./ha-types";
 import { POLYGON_PATTERN } from "./polygon";
 
@@ -53,16 +53,12 @@ const zone = (id: string, name: string, device = "dev1"): MockEntity => ({
   },
 });
 
-const axis = (id: string, name: string, a: "x" | "y", device = "dev1"): MockEntity => ({
+/** The ld2450 "xy" text sensor. HA shows ESPHome text sensors as `sensor` entities, with no unit or device class. */
+const xy = (id: string, name: string, state = "NA", device = "dev1", icon = "mdi:crosshairs-gps"): MockEntity => ({
   id,
   device,
-  state: "100",
-  attributes: {
-    friendly_name: name,
-    unit_of_measurement: "mm",
-    device_class: "distance",
-    icon: `mdi:alpha-${a}-box-outline`,
-  },
+  state,
+  attributes: { friendly_name: name, icon },
 });
 
 const presence = (id: string, name: string, device = "dev1"): MockEntity => ({
@@ -88,33 +84,39 @@ function livingRoom(): MockEntity[] {
         icon: "mdi:shield-account",
       },
     },
-    axis("sensor.lr_t2_x", "Living Room Target-2 X", "x"),
-    axis("sensor.lr_t1_x", "Living Room Target-1 X", "x"),
-    axis("sensor.lr_t1_y", "Living Room Target-1 Y", "y"),
-    axis("sensor.lr_t2_y", "Living Room Target-2 Y", "y"),
-    // Target distance: same unit and device class, different icon
+    xy("sensor.lr_t2_xy", "Living Room Target-2 XY"),
+    xy("sensor.lr_t1_xy", "Living Room Target-1 XY", "-782,1713"),
+    // The direction text sensor says "NA" without a target too, but has another icon
     {
-      id: "sensor.lr_t1_distance",
+      id: "sensor.lr_t1_direction",
       device: "dev1",
+      state: "NA",
+      attributes: { friendly_name: "Living Room Target-1 Direction", icon: "mdi:sign-direction" },
+    },
+    // The separate X sensor of a target isn't used
+    {
+      id: "sensor.lr_t1_x",
+      device: "dev1",
+      state: "-782",
       attributes: {
-        friendly_name: "Living Room Target-1 Distance",
+        friendly_name: "Living Room Target-1 X",
         unit_of_measurement: "mm",
         device_class: "distance",
-        icon: "mdi:map-marker-distance",
+        icon: "mdi:alpha-x-box-outline",
       },
     },
   ];
 }
 
-describe("stripAxis", () => {
+describe("stripWord", () => {
   it.each([
-    ["Target-1 X", "x", "Target-1"],
-    ["target_1_y", "y", "target_1"],
-    ["X of Target 2", "x", "of Target 2"],
-    ["Box Target", "x", undefined],
-    ["Target 1 Y", "x", undefined],
-  ] as const)("%s without %s is %s", (name, a, expected) => {
-    expect(stripAxis(name, a)).toBe(expected);
+    ["Target-1 XY", "xy", "Target-1"],
+    ["target_1_xy", "xy", "target_1"],
+    ["XY of Target 2", "xy", "of Target 2"],
+    ["Maxy Target", "xy", undefined],
+    ["Target 1 X", "xy", undefined],
+  ] as const)("%s without %s is %s", (name, word, expected) => {
+    expect(stripWord(name, word)).toBe(expected);
   });
 });
 
@@ -138,8 +140,8 @@ describe("discover", () => {
           },
         ],
         targets: [
-          { x: "sensor.lr_t1_x", y: "sensor.lr_t1_y", name: "Target-1" },
-          { x: "sensor.lr_t2_x", y: "sensor.lr_t2_y", name: "Target-2" },
+          { xy: "sensor.lr_t1_xy", name: "Target-1" },
+          { xy: "sensor.lr_t2_xy", name: "Target-2" },
         ],
         warnings: [],
       },
@@ -270,30 +272,20 @@ describe("discover", () => {
   it("uses overrides for presence and targets", () => {
     const hass = mockHass({ dev1: "Living Room" }, [
       ...livingRoom(),
-      {
-        id: "sensor.custom_x",
-        device: null,
-        attributes: { friendly_name: "Custom X" },
-      },
-      {
-        id: "sensor.custom_y",
-        device: null,
-        attributes: { friendly_name: "Custom Y" },
-      },
+      { id: "sensor.custom_xy", device: null, attributes: { friendly_name: "Custom XY" } },
     ]);
     const [device] = discover(hass, {
-      targets: [{ x: "sensor.custom_x", y: "sensor.custom_y" }],
+      targets: [{ xy: "sensor.custom_xy" }],
       zones: [{ polygon: "text.lr_couch", presence: "binary_sensor.lr_presence" }],
     });
-    expect(device.targets).toEqual([{ x: "sensor.custom_x", y: "sensor.custom_y", name: "Custom X" }]);
+    expect(device.targets).toEqual([{ xy: "sensor.custom_xy", name: "Custom" }]);
     expect(device.zones[0].presence).toBe("binary_sensor.lr_presence");
   });
 
   it("names devices and entities with the entity ID format", () => {
     const hass = mockHass({ dev1: "Radar" }, [
       zone("text.couch", "Radar Couch Zone"),
-      axis("sensor.t1_x", "Radar Target 1 X", "x"),
-      axis("sensor.t1_y", "Radar Target 1 Y", "y"),
+      xy("sensor.t1_xy", "Radar Target 1 XY"),
     ]);
     const parts: Record<string, string> = { floor: "Ground", area: "Living Room", device: "Radar" };
     hass.formatEntityName = (stateObj, items, options) =>
@@ -307,35 +299,53 @@ describe("discover", () => {
     expect(device.targets[0].name).toBe("Target 1");
   });
 
-  it.each(["cm", "m", "in", "ft", "yd"])("finds target sensors HA shows in %s", (unit) => {
-    const entities = livingRoom().map((e) =>
-      e.attributes?.unit_of_measurement === "mm"
-        ? { ...e, attributes: { ...e.attributes, unit_of_measurement: unit } }
-        : e,
-    );
-    const [device] = discover(mockHass({ dev1: "Living Room" }, entities));
-    expect(device.targets.map((t) => t.x)).toEqual(["sensor.lr_t1_x", "sensor.lr_t2_x"]);
-  });
+  describe("target xy sensors", () => {
+    const targetsOf = (entities: MockEntity[]) =>
+      discover(mockHass({ dev1: "Office" }, [zone("text.a", "Office Desk Zone"), ...entities]))[0];
 
-  it("doesn't take sensors without a length unit for target sensors", () => {
-    const entities = livingRoom().map((e) =>
-      e.attributes?.unit_of_measurement === "mm"
-        ? { ...e, attributes: { ...e.attributes, unit_of_measurement: "mm/s" } }
-        : e,
-    );
-    const [device] = discover(mockHass({ dev1: "Living Room" }, entities));
-    expect(device.targets).toEqual([]);
-  });
+    it.each(["NA", "unknown", "unavailable", "-782,1713", "0,2000"])("finds one that says %s", (state) => {
+      expect(targetsOf([xy("sensor.t1_xy", "Office Target 1 XY", state)]).targets).toEqual([
+        { xy: "sensor.t1_xy", name: "Target 1" },
+      ]);
+    });
 
-  it("warns about unpaired target sensors", () => {
-    const hass = mockHass({ dev1: "Office" }, [
-      zone("text.a", "Office Desk Zone"),
-      axis("sensor.t1_x", "Office Target 1 X", "x"),
-      axis("sensor.t1_y", "Office Target 1 Y", "y"),
-      axis("sensor.t2_x", "Office Target 2 X", "x"),
-    ]);
-    const [device] = discover(hass);
-    expect(device.targets).toHaveLength(1);
-    expect(device.warnings).toEqual([expect.stringContaining("sensor.t2_x")]);
+    it("ignores sensors with its icon that don't say a position", () => {
+      expect(targetsOf([xy("sensor.other", "Office Compass", "North")]).targets).toEqual([]);
+    });
+
+    it("needs its default icon, which users can change", () => {
+      const device = targetsOf([xy("sensor.t1_xy", "Office Target 1 XY", "-782,1713", "dev1", "mdi:target")]);
+      expect(device.targets).toEqual([]);
+      expect(device.warnings).toEqual([expect.stringContaining('"targets"')]);
+    });
+
+    it("ignores sensors of other devices", () => {
+      expect(targetsOf([xy("sensor.t1_xy", "Other Target 1 XY", "NA", "dev2")]).targets).toEqual([]);
+    });
+
+    it("numbers targets by the number in their names, or by their names", () => {
+      expect(
+        targetsOf([xy("sensor.b", "Office Target 3 XY"), xy("sensor.a", "Office Target 1 XY")]).targets.map(
+          (t) => t.xy,
+        ),
+      ).toEqual(["sensor.a", "sensor.b"]);
+      expect(
+        targetsOf([xy("sensor.b", "Office Beta XY"), xy("sensor.a", "Office Alpha XY")]).targets.map((t) => t.xy),
+      ).toEqual(["sensor.a", "sensor.b"]);
+    });
+
+    it("keeps the name when it has no XY", () => {
+      expect(targetsOf([xy("sensor.t1", "Office Target 1")]).targets).toEqual([{ xy: "sensor.t1", name: "Target 1" }]);
+    });
+
+    it("warns about more than three", () => {
+      const device = targetsOf([1, 2, 3, 4].map((n) => xy(`sensor.t${n}_xy`, `Office Target ${n} XY`)));
+      expect(device.targets).toHaveLength(4);
+      expect(device.warnings).toEqual([expect.stringContaining("4 target XY sensors")]);
+    });
+
+    it("warns when there are none", () => {
+      expect(targetsOf([]).warnings).toEqual([expect.stringContaining('No target "xy" text sensors')]);
+    });
   });
 });

@@ -3,8 +3,9 @@
 A Home Assistant dashboard card to draw polygon zones for [ESPHome](https://esphome.io/) LD2450 radars. Zones are
 evaluated on the device.
 
-> Work in progress. It requires ESPHome polygon zone support from
-> [esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154).
+> Work in progress. It requires the `xy` target text sensor of the LD2450, from
+> [esphome/esphome#21416](https://github.com/esphome/esphome/pull/21416), which isn't in an ESPHome release yet.
+> Polygon zones, from [esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154), are already in ESPHome.
 
 <img src="https://raw.githubusercontent.com/fornellas/ld2450-zone-card/main/docs/screenshot.png" alt="The card editing an occupied zone, with the floor plan, the radar and a target" width="400">
 
@@ -13,7 +14,7 @@ evaluated on the device.
 ### Finding your radars
 
 - **Automatic discovery.** Every ESPHome device with LD2450 polygon zones is found and listed; pick the device and the
-  zone to edit at the top. Each zone's presence sensor and the target X/Y sensors are found too.
+  zone to edit at the top. Each zone's presence sensor and the targets' `xy` text sensors are found too.
 - **Names follow Home Assistant.** Devices are named with your _Entity ID format_ (Settings → System), for example
   area and device.
 - **Overrides.** If anything isn't found automatically, the card config can name the entities (see
@@ -27,8 +28,8 @@ evaluated on the device.
 - **Floor plan:** an outline of the room you draw yourself.
 - **Zones:** the selected zone is highlighted, the others are dashed, and occupied zones (from their presence
   sensors) are filled.
-- **Targets:** live positions of up to three people, also listed under the map, with an **Update interval** field
-  (see [Target update interval](#target-update-interval)).
+- **Targets:** live positions of up to three people, also listed under the map. Each position comes from one radar
+  frame, as the `xy` text sensor of a target publishes its `x` and `y` together.
 - **Toggle anything** by clicking it in the legend: tracking range, floor plan, selected zone, occupied and targets.
   The choice is saved per user.
 - **Fits what's shown:** the map zooms to the visible items, targets and trail.
@@ -98,16 +99,17 @@ type: custom:ld2450-zone-card
 ### ESPHome configuration
 
 The device needs polygon zones: a text entity per zone under `text: - platform: ld2450`, each with a presence sensor
-under `binary_sensor: - platform: ld2450`. To show targets, add the `x` and `y` sensors of `target_1`…`target_3`
-under `sensor: - platform: ld2450`. See the
-[polygon zones documentation](https://github.com/esphome/esphome.io/pull/7632) for all options.
+under `binary_sensor: - platform: ld2450`. To show targets, add the `xy` text sensor of `target_1`…`target_3` under
+`text_sensor: - platform: ld2450`. See the [LD2450 documentation](https://esphome.io/components/sensor/ld2450/) for
+polygon zones, and the [pull request with the `xy` documentation](https://github.com/esphome/esphome.io/pull/7874)
+for the text sensor.
 
 A full example, with two zones and three targets:
 
 ```yaml
-# Polygon zones aren't in an ESPHome release yet: take the ld2450 component from its pull request
+# The xy text sensor isn't in an ESPHome release yet: take the ld2450 component from its pull request
 external_components:
-  - source: github://pr#20154
+  - source: github://pr#21416
     components: [ld2450]
 
 uart:
@@ -143,64 +145,46 @@ binary_sensor:
       - polygon_zone_id: desk_zone
         name: Desk Occupied
 
-# Target positions, drawn live on the card's map. Keep their default icons and units, so the card finds them, and
-# don't add filters that change their values. Their default filters let each one through about once a second: if you
-# change that throttle, set the card's "Update interval" to match.
-sensor:
+# Target positions, drawn live on the card's map, each as "x,y" in mm (or "NA" without a target), with x and y from the
+# same radar frame. Keep their default icon, so the card finds them, and name them "Target N XY". A position is
+# published at most once per `throttle` (1 s by default): lower it for a smoother map, at the cost of more state
+# updates sent to Home Assistant.
+text_sensor:
   - platform: ld2450
     ld2450_id: ld2450_radar
     target_1:
-      x:
-        name: Target-1 X
-      y:
-        name: Target-1 Y
+      xy:
+        name: Target-1 XY
     target_2:
-      x:
-        name: Target-2 X
-      y:
-        name: Target-2 Y
+      xy:
+        name: Target-2 XY
     target_3:
-      x:
-        name: Target-3 X
-      y:
-        name: Target-3 Y
+      xy:
+        name: Target-3 XY
+        throttle: 200ms
 ```
 
 Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch Occupied`) and the card pairs them
 automatically. Other names are paired by the words they share, and a zone that matches more than one sensor equally
 well is left for you to pair in the [configuration](#configuration).
 
-Zones are checked on the device in the radar's own coordinates, and target sensors are drawn on the same map, so don't
-change their values with filters (for example multiplying X by -1 for an upside down radar). Use the card's **Upside
-down** option instead.
-
-### Target update interval
-
-The radar sends 10 frames a second, but ESPHome's default filters on the target X and Y sensors only let each one
-through about once a second, separately, and only when its value changed. So Home Assistant gets X and Y at different
-moments, and drawing the latest of each would mix two moments.
-
-When one updates, the card waits a little for the other: if it updates, the target moves to the new X and Y; if not,
-it moves with the other's current value. The wait is 1.2 times the **Update interval**, in seconds, which you set in
-the field to the right of the targets, under the map: the throttle you configured on the target X/Y sensors in
-ESPHome. It's 1 s by default, to match ESPHome's defaults. If you remove the filters (`filters: []`) the sensors
-update together, up to 10 times a second, so set it to 0.1 and positions are exact; this sends more state updates to
-Home Assistant. The setting is kept for each device, for all users, and only administrators can change it.
+Zones are checked on the device in the radar's own coordinates, and the `xy` sensors publish the same raw coordinates, so
+the card draws both on the same map. For a radar mounted upside down, use the card's **Upside down** option, not
+ESPHome filters.
 
 ### Configuration
 
 Auto-discovery depends on the default configuration. If you change anything, you'll need to manually specify the
 entities. Discovery relies on these defaults:
 
-- **Target X/Y sensors:** `sensor` entities on the same device as the zones, with `device_class: distance`, a length
-  unit (mm by default, or any length unit Home Assistant shows them in), and icons `mdi:alpha-x-box-outline` (X) and
-  `mdi:alpha-y-box-outline` (Y). The X and Y of a target are paired by their names, which must differ only by "X"
-  and "Y" (for example `Target-1 X` and `Target-1 Y`).
+- **Target `xy` text sensors:** `sensor` entities on the same device as the zones (Home Assistant shows ESPHome text
+  sensors as sensors), with the icon `mdi:crosshairs-gps`, and a state that's `x,y` in mm, `NA`, `unknown` or
+  `unavailable`. Targets are numbered by the number in their names (for example `Target-1 XY`), or by name order.
 - **Presence sensors:** `binary_sensor` entities on the same device as the zones, with `device_class: occupancy` and
   no icon, paired with their zones by name (see above).
 
-Changing an icon, device class or unit in your ESPHome YAML or in Home Assistant hides that entity from discovery.
-Name it in the `targets:` (target X/Y sensors) or `zones:` (presence sensors) option instead.
+Changing an icon or device class in your ESPHome YAML or in Home Assistant hides that entity from discovery. Name it in
+the `targets:` (`xy` text sensors) or `zones:` (presence sensors) option instead.
 
 Every option can be set in the card's visual editor, or in YAML. They're all optional, and override automatic
 discovery:
@@ -209,9 +193,8 @@ discovery:
 type: custom:ld2450-zone-card
 title: Living room radar # card title
 device_id: 0123456789abcdef # only show this device
-targets: # the target X/Y sensors
-  - x: sensor.living_room_target_1_x
-    y: sensor.living_room_target_1_y
+targets: # the target xy text sensors
+  - xy: sensor.living_room_target_1_xy
 zones: # pair a zone with its presence sensor
   - polygon: text.living_room_couch_zone
     presence: binary_sensor.living_room_couch_occupied

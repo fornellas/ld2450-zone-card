@@ -3,14 +3,14 @@
 import type { EntityNameType, HassEntity, HomeAssistant } from "./ha-types";
 import { DEFAULT_ENTITY_ID_PARTS, deviceNameParts } from "./naming";
 import { POLYGON_MAX, POLYGON_MIN, isPolygonPattern } from "./polygon";
-import { MM_PER_LENGTH_UNIT } from "./units";
+import { isXYState } from "./targets";
 
 export const MAX_TARGETS = 3;
 
 export interface TargetSensors {
-  x: string;
-  y: string;
-  /** Name shared by the X and Y sensors, e.g. "Target-1". */
+  /** The target's "xy" text sensor. */
+  xy: string;
+  /** The sensor's name without "XY", e.g. "Target-1". */
   name: string;
 }
 
@@ -34,12 +34,12 @@ export interface Ld2450Device {
 /** Card config keys that override auto-detection. */
 export interface DiscoveryOverrides {
   device_id?: string;
-  targets?: { x: string; y: string }[];
+  targets?: { xy: string }[];
   zones?: { polygon: string; presence?: string }[];
 }
 
-const X_ICON = "mdi:alpha-x-box-outline";
-const Y_ICON = "mdi:alpha-y-box-outline";
+// The default icon of the ld2450 "xy" text sensor
+const XY_ICON = "mdi:crosshairs-gps";
 
 // Words that name the kind of entity rather than the zone, e.g. "Couch Zone Polygon" vs "Couch Occupied"
 const ZONE_NAME_STOPWORDS = new Set([
@@ -114,14 +114,14 @@ function words(text: string): string[] {
     .filter((w) => w !== "");
 }
 
-/** Remove the last standalone "x"/"y" word from a name: "Target-1 X" -> "Target-1". Undefined if there is none. */
-export function stripAxis(name: string, axis: "x" | "y"): string | undefined {
-  const re = new RegExp(`(^|[\\s_-])${axis}(?=$|[\\s_-])`, "gi");
+/** Remove the last standalone word from a name: "Target-1 XY" -> "Target-1". Undefined if there is none. */
+export function stripWord(name: string, word: string): string | undefined {
+  const re = new RegExp(`(^|[\\s_-])${word}(?=$|[\\s_-])`, "gi");
   let last: RegExpExecArray | undefined;
   for (let m = re.exec(name); m !== null; m = re.exec(name)) last = m;
   if (last === undefined) return undefined;
   const start = last.index + last[1].length;
-  return (name.slice(0, start) + name.slice(start + 1))
+  return (name.slice(0, start) + name.slice(start + word.length))
     .replace(/[\s_-]+$/, "")
     .replace(/^[\s_-]+/, "")
     .replace(/\s+/g, " ");
@@ -132,51 +132,29 @@ function firstNumber(text: string): number {
   return m ? Number(m[0]) : Number.POSITIVE_INFINITY;
 }
 
+/**
+ * The ld2450 "xy" text sensors of a device: Home Assistant shows ESPHome text sensors as `sensor` entities, with the
+ * sensor's icon (mdi:crosshairs-gps by default) and, as state, "x,y" in mm or "NA". The icon is a default users can
+ * change; the state is always one of those, and tells these from other text sensors that have a position's icon.
+ * Targets are numbered by the number in their names ("Target-1 XY"), or by their order.
+ */
 function findTargets(hass: HomeAssistant, entityIds: string[], devName: string, warnings: string[]): TargetSensors[] {
-  const candidates = (icon: string) =>
-    entityIds.filter((id) => {
+  const targets = entityIds
+    .filter((id) => {
       const s = hass.states[id];
-      return (
-        id.startsWith("sensor.") &&
-        s !== undefined &&
-        // The firmware publishes mm, but HA can show distance sensors in other length units
-        typeof s.attributes.unit_of_measurement === "string" &&
-        Object.hasOwn(MM_PER_LENGTH_UNIT, s.attributes.unit_of_measurement) &&
-        s.attributes.device_class === "distance" &&
-        s.attributes.icon === icon
-      );
-    });
-
-  const ys = new Map<string, string>();
-  for (const id of candidates(Y_ICON)) {
-    const key = stripAxis(friendlyName(hass, id), "y")?.toLowerCase();
-    if (key !== undefined && !ys.has(key)) ys.set(key, id);
-  }
-  const targets: TargetSensors[] = [];
-  const unpaired: string[] = [];
-  for (const id of candidates(X_ICON)) {
-    const key = stripAxis(friendlyName(hass, id), "x")?.toLowerCase();
-    const y = key === undefined ? undefined : ys.get(key);
-    if (key === undefined || y === undefined) {
-      unpaired.push(id);
-      continue;
-    }
-    ys.delete(key);
-    targets.push({
-      x: id,
-      y,
-      name: stripAxis(entityName(hass, id, devName), "x") ?? key,
-    });
-  }
-  unpaired.push(...ys.values());
-  if (unpaired.length > 0) {
-    warnings.push(`Target sensors without an X/Y pair: ${unpaired.join(", ")}. Set "targets" in the card config.`);
-  }
+      return id.startsWith("sensor.") && s !== undefined && s.attributes.icon === XY_ICON && isXYState(s.state);
+    })
+    .map((xy) => targetSensors(hass, xy, devName));
   if (targets.length > MAX_TARGETS) {
-    warnings.push(`Found ${targets.length} target X/Y pairs, but the LD2450 has ${MAX_TARGETS}. Set "targets".`);
+    warnings.push(`Found ${targets.length} target XY sensors, but the LD2450 has ${MAX_TARGETS}. Set "targets".`);
   }
   targets.sort((a, b) => firstNumber(a.name) - firstNumber(b.name) || a.name.localeCompare(b.name));
   return targets;
+}
+
+function targetSensors(hass: HomeAssistant, xy: string, devName: string): TargetSensors {
+  const name = entityName(hass, xy, devName);
+  return { xy, name: stripWord(name, "xy") ?? name };
 }
 
 // Scores of a zone-sensor pair: sharing all their words beats sharing any number of them
@@ -290,14 +268,16 @@ export function discover(
 
     // Overridden targets belong to the device of their X sensor; ones without a device go to the only device
     const overridden = (overrides.targets ?? []).filter((t) => {
-      const targetDevice = deviceOf(t.x);
+      const targetDevice = deviceOf(t.xy);
       return targetDevice === id || (targetDevice === undefined && single);
     });
     const targets =
       overridden.length > 0
-        ? overridden.map((t) => ({ ...t, name: entityName(hass, t.x, name) }))
+        ? overridden.map((t) => targetSensors(hass, t.xy, name))
         : findTargets(hass, entityIds, name, warnings);
-    if (targets.length === 0) warnings.push('No target X/Y sensors found. Set "targets" in the card config.');
+    if (targets.length === 0) {
+      warnings.push('No target "xy" text sensors found. Add them in ESPHome, or set "targets" in the card config.');
+    }
 
     devices.push({ id, name: deviceLabel(hass, id, polygonIds[0], entityIdParts), zones, targets, warnings });
   }

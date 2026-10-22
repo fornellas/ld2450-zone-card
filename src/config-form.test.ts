@@ -5,7 +5,7 @@ describe("configOverrides", () => {
   it("keeps complete items", () => {
     const config = {
       device_id: "dev1",
-      targets: [{ x: "sensor.x", y: "sensor.y" }],
+      targets: [{ xy: "sensor.target_1_xy" }],
       zones: [{ polygon: "text.couch", presence: "binary_sensor.couch" }],
     };
     expect(configOverrides(config)).toEqual(config);
@@ -15,12 +15,12 @@ describe("configOverrides", () => {
     expect(
       configOverrides({
         device_id: "",
-        targets: [{ x: "sensor.x", y: "" }, { x: "sensor.x" } as never, { x: "sensor.x", y: "sensor.y" }],
+        targets: [{ xy: "" }, {} as never, { xy: "sensor.target_1_xy" }],
         zones: [{ polygon: "" }, { polygon: "text.couch", presence: "" }],
       }),
     ).toEqual({
       device_id: undefined,
-      targets: [{ x: "sensor.x", y: "sensor.y" }],
+      targets: [{ xy: "sensor.target_1_xy" }],
       zones: [{ polygon: "text.couch", presence: undefined }],
     });
   });
