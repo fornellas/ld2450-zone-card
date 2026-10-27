@@ -3,9 +3,10 @@
 A Home Assistant dashboard card to draw polygon zones for [ESPHome](https://esphome.io/) LD2450 radars. Zones are
 evaluated on the device.
 
-> Work in progress. It requires the `xy` target text sensor of the LD2450, from
-> [esphome/esphome#21416](https://github.com/esphome/esphome/pull/21416), which isn't in an ESPHome release yet.
-> Polygon zones, from [esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154), are already in ESPHome.
+> As of 2026-10-27, this requires the dev version of esphome, as it contains the two required PRs
+> [esphome/esphome#21416](https://github.com/esphome/esphome/pull/21416) and
+> [esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154) that haven't made into a release yet.
+> 2026.11 release of esphome should contain both.
 
 <img src="https://raw.githubusercontent.com/fornellas/ld2450-zone-card/main/docs/screenshot.png" alt="The card editing an occupied zone, with the floor plan, the radar and a target" width="400">
 
@@ -161,7 +162,6 @@ text_sensor:
     target_3:
       xy:
         name: Target-3 XY
-        throttle: 200ms
 ```
 
 Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch Occupied`) and the card pairs them
