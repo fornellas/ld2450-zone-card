@@ -60,14 +60,16 @@ evaluated on the device.
 ### Radar position
 
 - **Upside down:** mirrors left and right, for radars mounted upside down.
-- **Rotation and X/Y position:** place the radar in the room, so the map, targets, zones and floor plan show in room
-  coordinates. Zones are still saved to the device in its own coordinates.
+- **Rotation and X/Y position:** place the radar in the room. Only the radar and the targets move: zones and the floor
+  plan stay where they are on the map, which is the room.
+- The device keeps zones relative to the radar, so after moving the radar, the zones show as unsaved. Save each one
+  again, and the device follows. Until then, the device still uses the old values.
 - Shared by all users; only administrators can change it.
 
 ### Floor plan
 
 - Pick **Floor plan** in the zone list to draw the room's outline, with the same tools as zones.
-- It moves with the radar position, and is shared by all users; only administrators can save it.
+- It stays where it's drawn when the radar moves, and is shared by all users; only administrators can save it.
 
 ### Where settings are kept
 

@@ -7,13 +7,13 @@ import type { Overlay } from "./user-settings";
 
 /** An edit from the map. */
 export interface DraftChange {
-  /** The new points, in radar coordinates. */
+  /** The new points, in room coordinates. */
   points: Point[];
   /** Set on every change of one drag, so they can be undone as one. */
   gesture?: string;
 }
 
-/** A polygon zone to draw, in radar coordinates. */
+/** A polygon zone to draw, in room coordinates: zones stay where they are when the radar's position changes. */
 export interface MapZone {
   name: string;
   points: Point[];
@@ -21,7 +21,7 @@ export interface MapZone {
   /** Whether its presence sensor is on. */
   occupied: boolean;
 }
-import { DEFAULT_MOUNT, type Mount, toRadar, toRoom } from "./transform";
+import { DEFAULT_MOUNT, type Mount, toRoom } from "./transform";
 import { type Units, formatGridLabel, formatLength, gridSpacing } from "./units";
 
 const RADAR_WIDTH = 440;
@@ -107,7 +107,7 @@ export class Ld2450ZoneMap extends LitElement {
   units: Units = "metric";
   targets: TargetPosition[] = [];
   zones: MapZone[] = [];
-  /** The saved floor plan, in radar coordinates. */
+  /** The floor plan, in room coordinates. */
   floorPlan: Point[] = [];
   /** The floor plan is the polygon being edited, so the editor draws it instead. */
   editingFloorPlan = false;
@@ -118,7 +118,7 @@ export class Ld2450ZoneMap extends LitElement {
   /** Show the trail. */
   trailShown = false;
   editable = false;
-  /** The selected zone's points being edited, in radar coordinates. */
+  /** The selected zone's points being edited, in room coordinates. */
   draft: Point[] = [];
   /** The selected zone's polygon on the device, drawn when the draft differs from it. */
   deviceOutline?: Point[];
@@ -145,13 +145,13 @@ export class Ld2450ZoneMap extends LitElement {
   override render() {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
-    const floorPlan = this.floorPlan.map((p) => toRoom(p, this.mount));
+    const floorPlan = this.floorPlan;
     // Fit what's shown: the radar, the zones, the outlines that are on, the targets and the trail. Not the polygon
     // being edited, so the map doesn't rescale while dragging its points.
     const radar = toRoom({ x: 0, y: 0 }, this.mount);
     const shown = [
       radar,
-      ...this.zones.flatMap((z) => z.points.map((p) => toRoom(p, this.mount))),
+      ...this.zones.flatMap((z) => z.points),
       ...(this._shown("trackingRange") ? area : []),
       ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
     ];
@@ -186,9 +186,7 @@ export class Ld2450ZoneMap extends LitElement {
     // Everything shown but the polygon being edited
     this._snapPoints = [
       ...(this.editingFloorPlan ? [] : floorPlan),
-      ...this.zones
-        .filter((z) => this.editingFloorPlan || !z.selected)
-        .flatMap((z) => z.points.map((p) => toRoom(p, this.mount))),
+      ...this.zones.filter((z) => this.editingFloorPlan || !z.selected).flatMap((z) => z.points),
     ];
 
     return html`
@@ -313,7 +311,7 @@ export class Ld2450ZoneMap extends LitElement {
       .filter((z) => z.points.length > 0)
       .sort((a, b) => Number(a.selected) - Number(b.selected));
     return zones.map((zone) => {
-      const points = zone.points.map((p) => toRoom(p, this.mount));
+      const points = zone.points;
       const occupied = zone.occupied && this._shown("occupied");
       const classes = ["zone", zone.selected ? "selected" : "", occupied ? "occupied" : ""].join(" ");
       return svg`
@@ -339,9 +337,9 @@ export class Ld2450ZoneMap extends LitElement {
   }
 
   private _renderEditor(font: number) {
-    const points = this.draft.map((p) => toRoom(p, this.mount));
+    const points = this.draft;
     const selected = this.zones.find((z) => z.selected);
-    const outline = this.deviceOutline?.map((p) => toRoom(p, this.mount));
+    const outline = this.deviceOutline;
     // Occupancy comes from the device's polygon: show it there, and not on changes the device doesn't have yet
     const occupied = selected?.occupied && this._shown("occupied") ? "occupied" : "";
     const classes = [
@@ -424,7 +422,7 @@ export class Ld2450ZoneMap extends LitElement {
     return { x: p.x, y: -p.y };
   }
 
-  /** A point from the user, snapped in room coordinates, as radar coordinates. */
+  /** A point from the user, snapped to a nearby point or the grid. */
   private _toDraftPoint(room: Point): Point {
     if (this.snapToPoints) {
       // The nearest point within reach of a finger wins over the grid
@@ -437,9 +435,9 @@ export class Ld2450ZoneMap extends LitElement {
           nearestDistance = d;
         }
       }
-      if (nearest !== undefined) return toRadar(nearest, this.mount);
+      if (nearest !== undefined) return nearest;
     }
-    return toRadar(snap(room, this.snapStep), this.mount);
+    return snap(room, this.snapStep);
   }
 
   private _emit<T>(name: string, detail: T): void {
@@ -450,8 +448,7 @@ export class Ld2450ZoneMap extends LitElement {
     if (!this._editorShown || this.draft.length >= POLYGON_MAX_POINTS) return;
     const room = this._roomPoint(ev);
     if (room === undefined) return;
-    const roomPoints = this.draft.map((p) => toRoom(p, this.mount));
-    const index = insertionIndex(roomPoints, room, this._hitRadius);
+    const index = insertionIndex(this.draft, room, this._hitRadius);
     const draft = [...this.draft];
     draft.splice(index, 0, this._toDraftPoint(room));
     this._emit<DraftChange>("draft-changed", { points: draft });

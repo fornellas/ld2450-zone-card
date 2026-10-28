@@ -3,7 +3,7 @@
 
 import type { HomeAssistant } from "./ha-types";
 import type { Point } from "./polygon";
-import { DEFAULT_MOUNT, type Mount, toRadar } from "./transform";
+import { DEFAULT_MOUNT, type Mount, toRoom } from "./transform";
 
 const KEY = "ld2450_zone_card";
 
@@ -11,10 +11,11 @@ export interface SystemSettings {
   /** How each radar is mounted, by device ID. */
   mounts?: Record<string, Mount>;
   /**
-   * The room's floor plan around each radar, by device ID. Its points are in radar coordinates (mm), like zones, so
-   * it moves with the radar's position settings. v0.0.14 stored a plain list in room coordinates.
+   * The room's floor plan around each radar, by device ID, in room coordinates (mm): it stays where it was drawn when
+   * the radar's position changes. Earlier versions stored it as a plain list in room coordinates (v0.0.14), or as
+   * { points } in radar coordinates (until v0.0.47), which moved it with the radar.
    */
-  floorPlans?: Record<string, { points: Point[] } | Point[]>;
+  floorPlans?: Record<string, { room: Point[] } | { points: Point[] } | Point[]>;
 }
 
 const isNumber = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -32,27 +33,35 @@ export function deviceMount(settings: SystemSettings | undefined, deviceId: stri
   return { invertX, rotation: m.rotation, offset: { x: m.offset.x, y: m.offset.y } };
 }
 
+/**
+ * Set the device's mount. A floor plan that's still in radar coordinates is fixed where it is in the room first, so
+ * the new mount doesn't move it.
+ */
 export function withDeviceMount(settings: SystemSettings, deviceId: string, mount: Mount): SystemSettings {
-  return { ...settings, mounts: { ...settings.mounts, [deviceId]: mount } };
+  const plan: unknown = settings.floorPlans?.[deviceId];
+  const inRadarCoordinates = typeof plan === "object" && plan !== null && "points" in plan;
+  const floorPlans = inRadarCoordinates
+    ? { ...settings.floorPlans, [deviceId]: { room: deviceFloorPlan(settings, deviceId) } }
+    : settings.floorPlans;
+  return { ...settings, floorPlans, mounts: { ...settings.mounts, [deviceId]: mount } };
 }
 
-/** The device's floor plan in radar coordinates, or none when it's missing or malformed. */
+/** The device's floor plan in room coordinates, or none when it's missing or malformed. */
 export function deviceFloorPlan(settings: SystemSettings | undefined, deviceId: string): Point[] {
   const plan: unknown = settings?.floorPlans?.[deviceId];
-  if (Array.isArray(plan)) {
-    // v0.0.14 stored room coordinates; convert with the current position, so it stays where it was shown
-    if (!plan.every(isPoint)) return [];
-    const mount = deviceMount(settings, deviceId);
-    return plan.map((p) => toRadar(p, mount));
-  }
-  const points: unknown = (plan as { points?: unknown } | undefined)?.points;
-  if (!Array.isArray(points) || !points.every(isPoint)) return [];
-  return points.map((p) => ({ x: p.x, y: p.y }));
+  const copy = (points: unknown): Point[] =>
+    Array.isArray(points) && points.every(isPoint) ? points.map((p) => ({ x: p.x, y: p.y })) : [];
+  if (Array.isArray(plan)) return copy(plan);
+  const { room, points } = (plan ?? {}) as { room?: unknown; points?: unknown };
+  if (room !== undefined) return copy(room);
+  // Radar coordinates: show it where the current mount puts it, as it was shown
+  const mount = deviceMount(settings, deviceId);
+  return copy(points).map((p) => toRoom(p, mount));
 }
 
-/** Set the device's floor plan, in radar coordinates. */
+/** Set the device's floor plan, in room coordinates. */
 export function withFloorPlan(settings: SystemSettings, deviceId: string, plan: Point[]): SystemSettings {
-  return { ...settings, floorPlans: { ...settings.floorPlans, [deviceId]: { points: plan } } };
+  return { ...settings, floorPlans: { ...settings.floorPlans, [deviceId]: { room: plan } } };
 }
 
 /** Call back with the settings now and whenever they change. Resolves to the unsubscribe function. */

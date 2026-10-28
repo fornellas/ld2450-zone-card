@@ -30,24 +30,45 @@ describe("system settings", () => {
     });
   });
 
-  it("reads and sets a device's floor plan", () => {
-    const plan = [
-      { x: 0, y: 0 },
-      { x: 1000, y: 0 },
-      { x: 1000, y: 1000 },
-    ];
+  const plan = [
+    { x: 0, y: 0 },
+    { x: 1000, y: 0 },
+    { x: 1000, y: 1000 },
+  ];
+
+  it("reads and sets a device's floor plan, in room coordinates", () => {
     const settings = withFloorPlan({ mounts: {} }, "dev1", plan);
-    expect(settings.floorPlans).toEqual({ dev1: { points: plan } });
+    expect(settings.floorPlans).toEqual({ dev1: { room: plan } });
     expect(deviceFloorPlan(settings, "dev1")).toEqual(plan);
     expect(deviceFloorPlan(settings, "dev2")).toEqual([]);
-    expect(deviceFloorPlan({ floorPlans: { dev1: { points: [{ x: "a" }] } as never } }, "dev1")).toEqual([]);
+    expect(deviceFloorPlan({ floorPlans: { dev1: { room: [{ x: "a" }] } as never } }, "dev1")).toEqual([]);
     expect(settings.mounts).toEqual({});
   });
 
-  it("converts v0.0.14 floor plans from room coordinates", () => {
+  it("doesn't move a floor plan with the radar", () => {
+    const settings = withFloorPlan({}, "dev1", plan);
+    const moved = withDeviceMount(settings, "dev1", { invertX: true, rotation: 90, offset: { x: 500, y: 500 } });
+    expect(deviceFloorPlan(moved, "dev1")).toEqual(plan);
+  });
+
+  it("reads v0.0.14 floor plans, plain lists, as room coordinates", () => {
     const mount = { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } };
-    const settings = { mounts: { dev1: mount }, floorPlans: { dev1: [{ x: 1000, y: 500 }] } };
-    expect(deviceFloorPlan(settings, "dev1")).toEqual([{ x: 0, y: 500 }]);
+    expect(deviceFloorPlan({ mounts: { dev1: mount }, floorPlans: { dev1: plan } }, "dev1")).toEqual(plan);
+  });
+
+  describe("floor plans in radar coordinates, from versions until v0.0.47", () => {
+    const mount = { invertX: false, rotation: 0, offset: { x: 1000, y: 0 } };
+    const old = { mounts: { dev1: mount }, floorPlans: { dev1: { points: [{ x: 0, y: 500 }] } } };
+
+    it("show where the radar's position puts them, as they were shown", () => {
+      expect(deviceFloorPlan(old, "dev1")).toEqual([{ x: 1000, y: 500 }]);
+    });
+
+    it("are fixed in the room when the radar's position changes", () => {
+      const moved = withDeviceMount(old, "dev1", { ...mount, offset: { x: 3000, y: 0 } });
+      expect(moved.floorPlans).toEqual({ dev1: { room: [{ x: 1000, y: 500 }] } });
+      expect(deviceFloorPlan(moved, "dev1")).toEqual([{ x: 1000, y: 500 }]);
+    });
   });
 
   it("sets a device's mount without touching others", () => {
