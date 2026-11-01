@@ -171,3 +171,55 @@ describe("ld2450-zone-map drawing order", () => {
     expect(getComputedStyle(root.querySelector(".target")!).pointerEvents).toBe("none");
   });
 });
+
+describe("ld2450-zone-map fitting the polygon being edited", () => {
+  const near = [
+    { x: -500, y: 1000 },
+    { x: 500, y: 1000 },
+    { x: 500, y: 2000 },
+  ];
+  const far = [
+    { x: 3000, y: 5000 },
+    { x: 3500, y: 5000 },
+    { x: 3500, y: 6000 },
+  ];
+
+  async function build(draft: { x: number; y: number }[], deviceOutline?: { x: number; y: number }[]) {
+    const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+    map.overlays = { trackingRange: false, floorPlan: false };
+    map.zones = [{ name: "Couch", points: near, selected: true, occupied: false }];
+    map.editable = true;
+    map.draft = draft;
+    map.deviceOutline = deviceOutline;
+    document.body.appendChild(map);
+    await map.updateComplete;
+    const viewBox = () => map.shadowRoot!.querySelector("svg")!.getAttribute("viewBox")!.split(" ").map(Number);
+    return { map, viewBox };
+  }
+
+  it("keeps an unsaved polygon in view, with the saved one", async () => {
+    const saved = await build(near);
+    const moved = await build(far, near);
+    // The unsaved polygon is far from the saved one, and the map zoomed out to hold both
+    expect(moved.viewBox()[2]).toBeGreaterThan(saved.viewBox()[2] * 2);
+    const [minX, , width] = moved.viewBox();
+    expect(minX + width).toBeGreaterThan(3500);
+  });
+
+  it("keeps the view still while a point is dragged, and fits on release", async () => {
+    const { map, viewBox } = await build(near, near);
+    const before = viewBox();
+    const vertex = map.shadowRoot!.querySelector("g.vertex")!;
+    const pointer = (type: string, x: number) =>
+      vertex.dispatchEvent(new MouseEvent(type, { clientX: x, clientY: 0, bubbles: true, composed: true }));
+    pointer("pointerdown", 0);
+    pointer("pointermove", 50);
+    // The card applies the drag: the polygon moves far away
+    map.draft = far;
+    await map.updateComplete;
+    expect(viewBox()).toEqual(before);
+    pointer("pointerup", 50);
+    await map.updateComplete;
+    expect(viewBox()[2]).toBeGreaterThan(before[2] * 2);
+  });
+});

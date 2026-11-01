@@ -139,6 +139,8 @@ export class Ld2450ZoneMap extends LitElement {
   /** Rendered width of the map, in screen pixels, to size things in pixels. */
   private _widthPx = 0;
   private _resizeObserver?: ResizeObserver;
+  /** The area the map fitted when last drawn. */
+  private _view?: Extent;
   private _drag?: { index: number; startX: number; startY: number; moved: boolean; gesture: string };
   private _drags = 0;
 
@@ -146,14 +148,15 @@ export class Ld2450ZoneMap extends LitElement {
     const area = DETECTION_AREA.map((p) => toRoom(p, this.mount));
     // Keep the room origin in view, so the radar offset can be seen against the axes
     const floorPlan = this.floorPlan;
-    // Fit what's shown: the radar, the zones, the outlines that are on, the targets and the trail. Not the polygon
-    // being edited, so the map doesn't rescale while dragging its points.
+    // Fit what's shown: the radar, the zones, the outlines that are on, the polygon being edited with the saved one it
+    // differs from, the targets and the trail.
     const radar = toRoom({ x: 0, y: 0 }, this.mount);
     const shown = [
       radar,
       ...this.zones.flatMap((z) => z.points),
       ...(this._shown("trackingRange") ? area : []),
       ...(this._shown("floorPlan") || this.editingFloorPlan ? floorPlan : []),
+      ...(this._editorShown ? [...this.draft, ...(this.deviceOutline ?? [])] : []),
     ];
     // Targets and trail points are drawn as circles around their position, so leave room for them
     const seen = [
@@ -169,7 +172,10 @@ export class Ld2450ZoneMap extends LitElement {
     }
     // With nothing else to show, fit the tracking range rather than a single point
     const fitted = extentOf(shown.length > 1 ? shown : [...shown, ...area]);
-    const content = growTo(fitted, MIN_MAP_SIZE);
+    // While a point is dragged the view stays as it was, so the map doesn't rescale under the pointer. It refits on
+    // release.
+    const content = this._drag?.moved && this._view !== undefined ? this._view : growTo(fitted, MIN_MAP_SIZE);
+    this._view = content;
     const size = Math.max(content.maxX - content.minX, content.maxY - content.minY);
     const font = size * 0.025;
     this._handle = size * 0.018;
@@ -487,7 +493,10 @@ export class Ld2450ZoneMap extends LitElement {
   private _vertexUp(ev: PointerEvent): void {
     const target = ev.currentTarget as Element;
     if (target.hasPointerCapture?.(ev.pointerId)) target.releasePointerCapture(ev.pointerId);
+    const dragged = this._drag?.moved;
     this._drag = undefined;
+    // Fit what was dragged
+    if (dragged) this.requestUpdate();
   }
 
   private _deleteVertex(ev: Event | undefined, index: number): void {
