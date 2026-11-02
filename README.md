@@ -78,7 +78,14 @@ evaluated on the device.
 
 ## Installation
 
-### HACS
+### HACS and the Marketplace
+
+On Home Assistant 2026.11 or later, open the repository in your Home Assistant's Marketplace, which offers to add it
+first if it isn't there yet:
+
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=fornellas&repository=ld2450-zone-card&category=plugin)
+
+Or, in HACS:
 
 1. Open HACS, then the ⋮ menu → **Custom repositories**.
 2. Add `https://github.com/fornellas/ld2450-zone-card` with type **Dashboard**.
