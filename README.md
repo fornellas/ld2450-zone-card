@@ -73,19 +73,20 @@ evaluated on the device.
 
 ### Where settings are kept
 
-- **Per user** (HA user data): units, map toggles, snapping, and the trail margin.
+- **Per user** (HA user data): units, map toggles, snapping, the trail margin, the selected device and zone, and which
+  sections are open. The card comes back as you left it.
 - **Shared** (HA system data, Home Assistant 2025.12 or later): radar positions and floor plans.
 
 ## Installation
 
-### HACS and the Marketplace
+### Marketplace
 
 On Home Assistant 2026.11 or later, open the repository in your Home Assistant's Marketplace, which offers to add it
 first if it isn't there yet:
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=fornellas&repository=ld2450-zone-card&category=plugin)
 
-Or, in HACS:
+### HACS
 
 1. Open HACS, then the ⋮ menu → **Custom repositories**.
 2. Add `https://github.com/fornellas/ld2450-zone-card` with type **Dashboard**.
@@ -108,18 +109,12 @@ type: custom:ld2450-zone-card
 
 ### ESPHome configuration
 
-The device needs polygon zones: a text entity per zone under `text: - platform: ld2450`, each with a presence sensor
-under `binary_sensor: - platform: ld2450`. To show targets, add the `xy` text sensor of `target_1`…`target_3` under
-`text_sensor: - platform: ld2450`. See the [LD2450 documentation](https://esphome.io/components/sensor/ld2450/) for
-polygon zones, and the [pull request with the `xy` documentation](https://github.com/esphome/esphome.io/pull/7874)
-for the text sensor.
-
 A full example, with two zones and three targets:
 
 ```yaml
-# The xy text sensor isn't in an ESPHome release yet: take the ld2450 component from its pull request
+# Only required before ESPHome 2026.11 is released: until then, take the ld2450 component from ESPHome's dev branch
 external_components:
-  - source: github://pr#21416
+  - source: github://esphome/esphome@dev
     components: [ld2450]
 
 uart:
