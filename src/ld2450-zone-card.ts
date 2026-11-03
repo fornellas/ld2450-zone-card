@@ -38,7 +38,14 @@ import {
   inputUnit,
   toInputValue,
 } from "./units";
-import { type Overlay, type UserSettings, fetchUserSettings, saveUserSettings } from "./user-settings";
+import {
+  DEFAULT_SECTIONS,
+  type Overlay,
+  type Section,
+  type UserSettings,
+  fetchUserSettings,
+  saveUserSettings,
+} from "./user-settings";
 import { CONFIG_FORM, configOverrides } from "./config-form";
 import "./mount-editor";
 import "./zone-map";
@@ -116,8 +123,6 @@ export class Ld2450ZoneCard extends LitElement {
   static override properties = {
     hass: { attribute: false },
     _config: { state: true },
-    _deviceId: { state: true },
-    _zoneId: { state: true },
     _entityIdParts: { state: true },
     _userSettings: { state: true },
     _systemSettings: { state: true },
@@ -135,8 +140,6 @@ export class Ld2450ZoneCard extends LitElement {
 
   hass?: HomeAssistant;
   private _config?: Ld2450ZoneCardConfig;
-  private _deviceId?: string;
-  private _zoneId?: string;
   private _entityIdParts?: EntityNameType[];
   private _userSettings?: UserSettings;
   private _systemSettings?: SystemSettings;
@@ -285,7 +288,7 @@ export class Ld2450ZoneCard extends LitElement {
     // Wait for the entity ID format, so device names don't change after the first render
     if (!this._config || !this.hass || !this._entityIdParts?.length) return nothing;
     const devices = discover(this.hass, configOverrides(this._config), this._entityIdParts);
-    const device = devices.find((d) => d.id === this._deviceId) ?? devices[0];
+    const device = devices.find((d) => d.id === this._userSettings?.deviceId) ?? devices[0];
     return html`
       <ha-card .header=${this._config.title ?? "LD2450 Zones"}>
         <div class="card-content">
@@ -307,8 +310,9 @@ export class Ld2450ZoneCard extends LitElement {
 
   /** What's selected for editing: a zone, or the device's floor plan. */
   private _target(device: Ld2450Device): Target | undefined {
-    if (this._zoneId === FLOOR_PLAN) return { kind: "floorPlan", key: `${FLOOR_PLAN}:${device.id}`, device };
-    const zone = device.zones.find((z) => z.polygon === this._zoneId) ?? device.zones[0];
+    const zoneId = this._userSettings?.zoneId;
+    if (zoneId === FLOOR_PLAN) return { kind: "floorPlan", key: `${FLOOR_PLAN}:${device.id}`, device };
+    const zone = device.zones.find((z) => z.polygon === zoneId) ?? device.zones[0];
     return zone === undefined ? undefined : { kind: "zone", key: zone.polygon, zone };
   }
 
@@ -402,7 +406,7 @@ export class Ld2450ZoneCard extends LitElement {
           ? nothing
           : this._renderEditor(target, mount, editing, offline, this._trails[device.id] ?? [])
       }
-      <details class="radar">
+      <details class="radar" ?open=${this._sectionOpen("radar")} @toggle=${this._sectionToggled("radar")}>
         <summary>Radar Position</summary>
         <p class="help">
           Moving the radar only moves the radar and the targets: zones and the floor plan stay where they are on the
@@ -423,7 +427,7 @@ export class Ld2450ZoneCard extends LitElement {
               ${device.warnings.map((w) => html`<li>${w}</li>`)}
             </ul>`
       }
-      <details>
+      <details ?open=${this._sectionOpen("entities")} @toggle=${this._sectionToggled("entities")}>
         <summary>Entities</summary>
         ${target?.kind === "zone" ? this._renderZone(target.zone) : nothing} ${this._renderTargets(device)}
       </details>
@@ -530,7 +534,7 @@ export class Ld2450ZoneCard extends LitElement {
           : "The device hasn't reported this zone yet, so changes can't be saved now.";
     }
     return html`
-      <details class="edit" open>
+      <details class="edit" ?open=${this._sectionOpen("edit")} @toggle=${this._sectionToggled("edit")}>
         <summary>Edit</summary>
         <p class="help">
           ${
@@ -1069,14 +1073,27 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
+  private _sectionOpen(section: Section): boolean {
+    return this._userSettings?.sections?.[section] ?? DEFAULT_SECTIONS[section];
+  }
+
+  private _sectionToggled(section: Section) {
+    return (ev: Event) => {
+      const open = (ev.target as HTMLDetailsElement).open;
+      // Also fired when rendering sets the attribute: only save actual changes
+      if (open !== this._sectionOpen(section)) {
+        this._setUserSetting({ sections: { ...this._userSettings?.sections, [section]: open } });
+      }
+    };
+  }
+
   private _deviceChanged(ev: Event): void {
-    this._deviceId = (ev.target as HTMLSelectElement).value;
-    this._zoneId = undefined;
+    this._setUserSetting({ deviceId: (ev.target as HTMLSelectElement).value, zoneId: undefined });
     this._selectVertex(undefined);
   }
 
   private _zoneChanged(ev: Event): void {
-    this._zoneId = (ev.target as HTMLSelectElement).value;
+    this._setUserSetting({ zoneId: (ev.target as HTMLSelectElement).value });
     this._selectVertex(undefined);
   }
 

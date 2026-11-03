@@ -19,7 +19,16 @@ export interface UserSettings {
   trailMargin?: Partial<Record<Units, number>>;
   /** Snap step for each unit system, in mm. */
   snapStep?: Partial<Record<Units, number>>;
+  /** The device and the zone (or floor plan) last selected. */
+  deviceId?: string;
+  zoneId?: string;
+  /** Whether each collapsible section is open. */
+  sections?: Partial<Record<Section, boolean>>;
 }
+
+export type Section = "edit" | "radar" | "entities";
+
+export const DEFAULT_SECTIONS: Record<Section, boolean> = { edit: true, radar: false, entities: false };
 
 export async function fetchUserSettings(hass: HomeAssistant): Promise<UserSettings> {
   try {

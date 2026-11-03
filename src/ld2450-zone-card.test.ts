@@ -822,6 +822,46 @@ describe("ld2450-zone-card", () => {
     });
   });
 
+  describe("remembered view", () => {
+    async function withSaved(value: Record<string, unknown>) {
+      const h = hass();
+      const callWS = h.callWS;
+      h.callWS = <T>(msg: { type: string; [key: string]: unknown }) =>
+        msg.type === "frontend/get_user_data" ? Promise.resolve({ value } as T) : callWS<T>(msg);
+      return renderCard({}, h);
+    }
+    const open = (root: ShadowRoot, selector: string) => (root.querySelector(selector) as HTMLDetailsElement).open;
+
+    it("opens Edit only by default", async () => {
+      const root = await withSaved({});
+      expect(open(root, "details.edit")).toBe(true);
+      expect(open(root, "details.radar")).toBe(false);
+      expect([...root.querySelectorAll("details")].filter((d) => d.open)).toHaveLength(1);
+    });
+
+    it("restores the zone and the sections", async () => {
+      const root = await withSaved({ zoneId: "text.desk", sections: { edit: false, radar: true, entities: true } });
+      expect((root.querySelectorAll(".selectors select")[1] as HTMLSelectElement).value).toBe("text.desk");
+      expect(open(root, "details.edit")).toBe(false);
+      expect(open(root, "details.radar")).toBe(true);
+      expect([...root.querySelectorAll("details")].every((d) => d.open === (d.className !== "edit"))).toBe(true);
+    });
+
+    it("saves the zone and a toggled section", async () => {
+      const root = await withSaved({});
+      calls.length = 0;
+      const zone = root.querySelectorAll(".selectors select")[1] as HTMLSelectElement;
+      zone.value = "text.desk";
+      zone.dispatchEvent(new Event("change"));
+      const radar = root.querySelector("details.radar") as HTMLDetailsElement;
+      radar.open = true;
+      radar.dispatchEvent(new Event("toggle"));
+      await (root.host as Ld2450ZoneCard).updateComplete;
+      const saved = calls.filter((c) => c.type === "frontend/set_user_data").map((c) => c.value);
+      expect(saved.at(-1)).toMatchObject({ zoneId: "text.desk", sections: { radar: true } });
+    });
+  });
+
   it("rejects invalid config", () => {
     const card = document.createElement("ld2450-zone-card") as Ld2450ZoneCard;
     const set = (config: Record<string, unknown>) =>
