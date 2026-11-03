@@ -209,7 +209,8 @@ zones: # pair a zone with its presence sensor
 ```sh
 npm install
 npm run watch   # rebuilds dist/ld2450-zone-card.js on changes
-npm run check   # typecheck, format check, tests and build
+npm run check   # typecheck, format check, tests, build and a check that docs/screenshot.png is up to date (needs Chrome)
+npm run screenshot   # rebuilds docs/screenshot.png from the current code (set CHROME_PATH if Chrome isn't found)
 ```
 
 To try a build, copy `dist/ld2450-zone-card.js` to `/config/www/` and add the resource as in the manual installation.

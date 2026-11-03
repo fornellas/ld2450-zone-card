@@ -12,21 +12,27 @@
   "scripts": {
     "build": "rollup -c",
     "watch": "rollup -c --watch",
+    "screenshot": "npm run build && node scripts/screenshot/screenshot.mjs",
+    "screenshot:check": "node scripts/screenshot/screenshot.mjs --check",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write src .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
-    "format:check": "prettier --check src .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
+    "format": "prettier --write src scripts .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
+    "format:check": "prettier --check src scripts .github README.md hacs.json package.json tsconfig.json .prettierrc rollup.config.js vitest.config.ts",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run format:check && npm test && npm run build"
+    "check": "npm run typecheck && npm run format:check && npm test && npm run build && npm run screenshot:check"
   },
   "dependencies": {
     "lit": "^3.3.3"
   },
   "devDependencies": {
+    "@fontsource/roboto": "^5.3.0",
     "@rollup/plugin-node-resolve": "^16.0.3",
     "@rollup/plugin-replace": "^6.0.3",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.9.9",
+    "puppeteer-core": "^25.16.0",
     "rollup": "^4.64.0",
     "rollup-plugin-esbuild": "^6.2.1",
     "typescript": "~5.9.3",

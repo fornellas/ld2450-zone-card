@@ -16,3 +16,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Upload the current screenshot
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: screenshot
+          path: dist/screenshot.png
+          if-no-files-found: ignore

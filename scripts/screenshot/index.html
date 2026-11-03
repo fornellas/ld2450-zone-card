@@ -1,0 +1,169 @@
+<!doctype html>
+<!-- A stand-in for Home Assistant's dashboard: the card only needs ha-card, the theme variables and a hass object. -->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      @font-face {
+        font-family: Roboto;
+        font-weight: 400;
+        src: url("/fonts/roboto-latin-400-normal.woff2");
+      }
+      @font-face {
+        font-family: Roboto;
+        font-weight: 500;
+        src: url("/fonts/roboto-latin-500-normal.woff2");
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        width: 520px;
+        font-family: Roboto, sans-serif;
+        /* Home Assistant's dark theme */
+        --primary-color: #03a9f4;
+        --accent-color: #ff9800;
+        --primary-text-color: #e1e1e1;
+        --text-primary-color: #fff;
+        --secondary-text-color: #9b9b9b;
+        --disabled-text-color: #6f6f6f;
+        --divider-color: rgba(225, 225, 225, 0.12);
+        --card-background-color: #1c1c1c;
+        --error-color: #db4437;
+        --warning-color: #ffa600;
+        --success-color: #43a047;
+        color: var(--primary-text-color);
+      }
+    </style>
+    <script>
+      customElements.define(
+        "ha-card",
+        class extends HTMLElement {
+          set header(v) {
+            this._h = v;
+            this.render();
+          }
+          connectedCallback() {
+            this.render();
+          }
+          render() {
+            if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+            this.shadowRoot.innerHTML = `<style>::slotted(.card-content) { padding: 16px; } :host { display: block; background: var(--card-background-color); border-radius: 12px; color: var(--primary-text-color); }</style><div style="padding:16px 16px 0;font-size:24px;line-height:32px">${this._h ?? ""}</div><slot></slot>`;
+          }
+        },
+      );
+    </script>
+    <script type="module">
+      import "/ld2450-zone-card.js";
+
+      // The room, as seen from above, in mm. The radar is in the top left corner, facing down and right.
+      const mount = { invertX: false, rotation: -135, offset: { x: 0, y: 0 } };
+      const room = {
+        zone: [
+          [2120, -800],
+          [2120, -1830],
+          [2730, -1830],
+          [2730, -2450],
+          [2500, -2700],
+          [0, -2700],
+          [0, -2100],
+          [300, -2100],
+          [300, -800],
+        ],
+        floorPlan: [
+          [0, 0],
+          [2120, 0],
+          [2120, -1830],
+          [2730, -1830],
+          [2730, -2700],
+          [0, -2700],
+          [0, -2100],
+          [140, -2100],
+          [140, -800],
+          [30, -800],
+          [30, -550],
+          [0, -550],
+        ],
+        target: [1330, -920],
+      };
+      // Devices keep zones and targets in the radar's own coordinates
+      const toRadar = ([px, py]) => {
+        const dx = px - mount.offset.x;
+        const dy = py - mount.offset.y;
+        const a = (mount.rotation * Math.PI) / 180;
+        return [Math.round(dx * Math.cos(a) + dy * Math.sin(a)), Math.round(-dx * Math.sin(a) + dy * Math.cos(a))];
+      };
+      const polygon = (points) => points.map((p) => toRadar(p).join(",")).join(";");
+
+      const pattern = "^ *$|^ *-?\\d{1,4} *, *\\d{1,4} *(; *-?\\d{1,4} *, *\\d{1,4} *){2,22};? *$";
+      const states = {};
+      const entities = {};
+      const add = (entity_id, state, attributes) => {
+        states[entity_id] = { entity_id, state, attributes, last_changed: "", last_updated: "" };
+        entities[entity_id] = { entity_id, device_id: "office", platform: "esphome" };
+      };
+      add("text.polygon_zone_1", polygon(room.zone), {
+        min: 0,
+        max: 255,
+        pattern,
+        friendly_name: "Fabio's Office Occupancy Polygon Zone 1",
+      });
+      add("text.polygon_zone_2", "", {
+        min: 0,
+        max: 255,
+        pattern,
+        friendly_name: "Fabio's Office Occupancy Polygon Zone 2",
+      });
+      add("binary_sensor.polygon_zone_1_occupied", "on", {
+        friendly_name: "Fabio's Office Occupancy Polygon Zone 1 Occupied",
+        device_class: "occupancy",
+      });
+      add("sensor.target_1_xy", toRadar(room.target).join(","), {
+        friendly_name: "Fabio's Office Occupancy Target 1 XY",
+        icon: "mdi:crosshairs-gps",
+      });
+      add("sensor.target_2_xy", "NA", {
+        friendly_name: "Fabio's Office Occupancy Target 2 XY",
+        icon: "mdi:crosshairs-gps",
+      });
+      add("sensor.target_3_xy", "NA", {
+        friendly_name: "Fabio's Office Occupancy Target 3 XY",
+        icon: "mdi:crosshairs-gps",
+      });
+
+      const userSettings = {
+        units: "metric",
+        overlays: { trackingRange: false },
+        sections: { edit: true, radar: true, entities: false },
+      };
+      const systemSettings = {
+        mounts: { office: mount },
+        floorPlans: { office: { room: room.floorPlan.map(([x, y]) => ({ x, y })) } },
+      };
+      const hass = {
+        states,
+        entities,
+        devices: { office: { id: "office", name: "Fabio's Office Occupancy", name_by_user: null } },
+        config: { unit_system: { length: "km" } },
+        user: { is_admin: true },
+        connection: {
+          subscribeMessage: async (callback) => {
+            callback({ value: systemSettings });
+            return () => {};
+          },
+        },
+        callService: async () => {},
+        callWS: async (msg) => {
+          if (msg.type === "frontend/get_user_data") return { value: userSettings };
+          if (msg.type === "config/entity_registry/settings/get") return { entity_id_parts: ["device"] };
+          return null;
+        },
+      };
+
+      const card = document.createElement("ld2450-zone-card");
+      card.setConfig({ type: "custom:ld2450-zone-card", title: "LD2450 Zones" });
+      card.hass = hass;
+      document.body.appendChild(card);
+    </script>
+  </head>
+  <body></body>
+</html>
