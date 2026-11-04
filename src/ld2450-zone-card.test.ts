@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { HomeAssistant } from "./ha-types";
 import "./ld2450-zone-card";
 import { Ld2450ZoneCard } from "./ld2450-zone-card";
 import { POLYGON_PATTERN, formatPolygon, type Point } from "./polygon";
+import { PRESS_INTERVAL_MS } from "./unfiltered";
 
 let calls: { type: string; [key: string]: unknown }[] = [];
 let systemData: unknown = null;
@@ -880,8 +881,66 @@ describe("ld2450-zone-card", () => {
     expect([...root.querySelectorAll("select")[0].options].map((o) => o.textContent)).toEqual(["Office"]);
   });
 
+  describe("xy unfiltered button", () => {
+    const presses = () => calls.filter((c) => c.type === "button.press");
+    function withButton(state = "unknown") {
+      const h = hass();
+      h.states["button.xy_unfiltered"] = {
+        entity_id: "button.xy_unfiltered",
+        state,
+        attributes: { icon: "mdi:filter-off" },
+        last_changed: "",
+        last_updated: "",
+      };
+      h.entities["button.xy_unfiltered"] = {
+        entity_id: "button.xy_unfiltered",
+        device_id: "dev1",
+        platform: "esphome",
+      };
+      return h;
+    }
+
+    it("is pressed while the card is shown, and not after it's removed", async () => {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      try {
+        const root = await renderCard({}, withButton());
+        expect(presses()).toEqual([expect.objectContaining({ entity_id: "button.xy_unfiltered" })]);
+        vi.advanceTimersByTime(PRESS_INTERVAL_MS);
+        expect(presses()).toHaveLength(2);
+        root.host.remove();
+        vi.advanceTimersByTime(PRESS_INTERVAL_MS * 3);
+        expect(presses()).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("is left alone without a button, or while the device is offline", async () => {
+      const without = await renderCard({}, hass());
+      expect(presses()).toEqual([]);
+      without.host.remove();
+      const offline = await renderCard({}, withButton("unavailable"));
+      expect(presses()).toEqual([]);
+      offline.host.remove();
+    });
+
+    it("is pressed by the config's button", async () => {
+      const h = hass();
+      h.states["button.mine"] = {
+        entity_id: "button.mine",
+        state: "unknown",
+        attributes: {},
+        last_changed: "",
+        last_updated: "",
+      };
+      const root = await renderCard({ xy_unfiltered: "button.mine" }, h);
+      expect(presses()).toEqual([expect.objectContaining({ entity_id: "button.mine" })]);
+      root.host.remove();
+    });
+  });
+
   it("has a visual editor for every option", () => {
     const form = (Ld2450ZoneCard as unknown as { getConfigForm(): { schema: { name: string }[] } }).getConfigForm();
-    expect(form.schema.map((f) => f.name)).toEqual(["title", "device_id", "targets", "zones"]);
+    expect(form.schema.map((f) => f.name)).toEqual(["title", "device_id", "targets", "xy_unfiltered", "zones"]);
   });
 });

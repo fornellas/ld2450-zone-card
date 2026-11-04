@@ -6,6 +6,7 @@ describe("configOverrides", () => {
     const config = {
       device_id: "dev1",
       targets: [{ xy: "sensor.target_1_xy" }],
+      xy_unfiltered: "button.xy_unfiltered",
       zones: [{ polygon: "text.couch", presence: "binary_sensor.couch" }],
     };
     expect(configOverrides(config)).toEqual(config);
@@ -15,11 +16,13 @@ describe("configOverrides", () => {
     expect(
       configOverrides({
         device_id: "",
+        xy_unfiltered: "",
         targets: [{ xy: "" }, {} as never, { xy: "sensor.target_1_xy" }],
         zones: [{ polygon: "" }, { polygon: "text.couch", presence: "" }],
       }),
     ).toEqual({
       device_id: undefined,
+      xy_unfiltered: undefined,
       targets: [{ xy: "sensor.target_1_xy" }],
       zones: [{ polygon: "text.couch", presence: undefined }],
     });

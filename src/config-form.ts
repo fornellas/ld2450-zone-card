@@ -11,6 +11,7 @@ const LABELS: Record<string, string> = {
   title: "Title",
   device_id: "Device",
   targets: "Target XY sensors",
+  xy_unfiltered: "XY unfiltered button",
   zones: "Zones",
 };
 
@@ -18,6 +19,9 @@ const HELPERS: Record<string, string> = {
   device_id: "Leave empty to auto-discover all LD2450 devices and select them from the card.",
   targets:
     "The xy text sensor of each target. Leave empty to find them automatically, from their default icon and state.",
+  xy_unfiltered:
+    "The button that makes the target xy sensors publish every position. Leave empty to find it automatically, " +
+    "from its default icon.",
   zones:
     "Pair a zone with its presence sensor. Leave empty to pair them automatically, by name " +
     '(for example "Couch" and "Couch Occupied").',
@@ -41,6 +45,7 @@ export const CONFIG_FORM = {
         },
       },
     },
+    { name: "xy_unfiltered", selector: entity("button") },
     {
       name: "zones",
       selector: {
@@ -70,6 +75,7 @@ export function configOverrides(config: DiscoveryOverrides): DiscoveryOverrides 
   return {
     device_id: isEntityId(config.device_id) ? config.device_id : undefined,
     targets: config.targets?.filter((t) => isEntityId(t.xy)).map((t) => ({ xy: t.xy })),
+    xy_unfiltered: isEntityId(config.xy_unfiltered) ? config.xy_unfiltered : undefined,
     zones: config.zones
       ?.filter((z) => isEntityId(z.polygon))
       .map((z) => ({ polygon: z.polygon, presence: isEntityId(z.presence) ? z.presence : undefined })),

@@ -27,6 +27,8 @@ export interface Ld2450Device {
   name: string;
   zones: Zone[];
   targets: TargetSensors[];
+  /** The button that makes the "xy" text sensors publish every position for a while, if the device has one. */
+  xyUnfilteredButton?: string;
   /** Problems the user may fix with the card config. */
   warnings: string[];
 }
@@ -35,11 +37,14 @@ export interface Ld2450Device {
 export interface DiscoveryOverrides {
   device_id?: string;
   targets?: { xy: string }[];
+  xy_unfiltered?: string;
   zones?: { polygon: string; presence?: string }[];
 }
 
 // The default icon of the ld2450 "xy" text sensor
 const XY_ICON = "mdi:crosshairs-gps";
+// The default icon of the ld2450 "xy_unfiltered" button
+const XY_UNFILTERED_ICON = "mdi:filter-off";
 
 // Words that name the kind of entity rather than the zone, e.g. "Couch Zone Polygon" vs "Couch Occupied"
 const ZONE_NAME_STOPWORDS = new Set([
@@ -150,6 +155,14 @@ function findTargets(hass: HomeAssistant, entityIds: string[], devName: string, 
   }
   targets.sort((a, b) => firstNumber(a.name) - firstNumber(b.name) || a.name.localeCompare(b.name));
   return targets;
+}
+
+/** The ld2450 "xy_unfiltered" button of a device: a button with its default icon, which no other ld2450 button has. */
+function findXYUnfilteredButton(hass: HomeAssistant, entityIds: string[]): string | undefined {
+  const buttons = entityIds.filter(
+    (id) => id.startsWith("button.") && hass.states[id]?.attributes.icon === XY_UNFILTERED_ICON,
+  );
+  return buttons.length === 1 ? buttons[0] : undefined;
 }
 
 function targetSensors(hass: HomeAssistant, xy: string, devName: string): TargetSensors {
@@ -279,7 +292,21 @@ export function discover(
       warnings.push('No target "xy" text sensors found. Add them in ESPHome, or set "targets" in the card config.');
     }
 
-    devices.push({ id, name: deviceLabel(hass, id, polygonIds[0], entityIdParts), zones, targets, warnings });
+    // An overridden button belongs to its own device; one without a device goes to the only device
+    const buttonDevice = overrides.xy_unfiltered === undefined ? undefined : deviceOf(overrides.xy_unfiltered);
+    const xyUnfilteredButton =
+      overrides.xy_unfiltered !== undefined && (buttonDevice === id || (buttonDevice === undefined && single))
+        ? overrides.xy_unfiltered
+        : findXYUnfilteredButton(hass, entityIds);
+
+    devices.push({
+      id,
+      name: deviceLabel(hass, id, polygonIds[0], entityIdParts),
+      zones,
+      targets,
+      xyUnfilteredButton,
+      warnings,
+    });
   }
   devices.sort((a, b) => a.name.localeCompare(b.name));
   return devices;

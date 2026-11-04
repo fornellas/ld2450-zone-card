@@ -47,6 +47,7 @@ import {
   saveUserSettings,
 } from "./user-settings";
 import { CONFIG_FORM, configOverrides } from "./config-form";
+import { holdUnfiltered } from "./unfiltered";
 import "./mount-editor";
 import "./zone-map";
 import type { DraftChange } from "./zone-map";
@@ -178,6 +179,11 @@ export class Ld2450ZoneCard extends LitElement {
   private _trails: Record<string, Point[]> = {};
   /** The last position recorded for each target, so a target standing still isn't recorded again and again. */
   private _trailLast: Record<string, Record<string, string>> = {};
+  /** The shown device's unfiltered button, and what stops pressing it. */
+  private _unfilteredWanted?: string;
+  private _unfilteredHeld?: { button: string; release: () => void };
+  private _onScreen = true;
+  private _intersection?: IntersectionObserver;
 
   /** The visual editor, built by Home Assistant from this form. */
   static getConfigForm() {
@@ -194,6 +200,13 @@ export class Ld2450ZoneCard extends LitElement {
       throw new Error('"device_id" must be a device ID');
     }
     checkTargets(config.targets);
+    if (
+      config.xy_unfiltered !== undefined &&
+      config.xy_unfiltered !== null &&
+      typeof config.xy_unfiltered !== "string"
+    ) {
+      throw new Error('"xy_unfiltered" must be a button entity ID');
+    }
     checkEntityList(config.zones, "zones", ["polygon", "presence"]);
     this._config = config;
   }
@@ -231,6 +244,15 @@ export class Ld2450ZoneCard extends LitElement {
   override connectedCallback(): void {
     super.connectedCallback();
     this.addEventListener("keydown", this._keydown);
+    document.addEventListener("visibilitychange", this._syncUnfiltered);
+    // Cards in dashboard views that aren't shown aren't on screen
+    if (typeof IntersectionObserver !== "undefined") {
+      this._intersection = new IntersectionObserver((entries) => {
+        this._onScreen = entries.at(-1)?.isIntersecting ?? true;
+        this._syncUnfiltered();
+      });
+      this._intersection.observe(this);
+    }
     // Subscribes again in willUpdate after being moved around the dashboard
     this.requestUpdate();
   }
@@ -238,10 +260,38 @@ export class Ld2450ZoneCard extends LitElement {
   override disconnectedCallback(): void {
     super.disconnectedCallback();
     this.removeEventListener("keydown", this._keydown);
+    document.removeEventListener("visibilitychange", this._syncUnfiltered);
+    this._intersection?.disconnect();
+    this._intersection = undefined;
+    this._onScreen = true;
+    this._syncUnfiltered();
     this._unsubscribeSystem?.then((unsubscribe) => unsubscribe()).catch(() => undefined);
     this._unsubscribeSystem = undefined;
     clearTimeout(this._savingTimer);
   }
+
+  override updated(): void {
+    this._syncUnfiltered();
+  }
+
+  /** Have the device publish every target position while the card is visible and the button can be pressed. */
+  private _syncUnfiltered = (): void => {
+    const button = this._unfilteredWanted;
+    const state = button === undefined ? undefined : this.hass?.states[button]?.state;
+    const wanted =
+      button !== undefined &&
+      this.isConnected &&
+      this._onScreen &&
+      document.visibilityState !== "hidden" &&
+      state !== undefined &&
+      state !== "unavailable"
+        ? button
+        : undefined;
+    if (this._unfilteredHeld?.button === wanted) return;
+    this._unfilteredHeld?.release();
+    this._unfilteredHeld =
+      wanted === undefined ? undefined : { button: wanted, release: holdUnfiltered(wanted, () => this.hass) };
+  };
 
   /**
    * Keep the device's zones where they are on the map when the radar moves: zones without edits get a draft in room
@@ -289,6 +339,7 @@ export class Ld2450ZoneCard extends LitElement {
     if (!this._config || !this.hass || !this._entityIdParts?.length) return nothing;
     const devices = discover(this.hass, configOverrides(this._config), this._entityIdParts);
     const device = devices.find((d) => d.id === this._userSettings?.deviceId) ?? devices[0];
+    if (device === undefined) this._unfilteredWanted = undefined;
     return html`
       <ha-card .header=${this._config.title ?? "LD2450 Zones"}>
         <div class="card-content">
@@ -321,6 +372,7 @@ export class Ld2450ZoneCard extends LitElement {
     const floorPlan = deviceFloorPlan(this._systemSettings, device.id);
     const target = this._target(device);
     this._currentTarget = target;
+    this._unfilteredWanted = device.xyUnfilteredButton;
     this._currentDevice = device.id;
     this._currentZones = device.zones;
     const editing = target === undefined ? undefined : this._editing(target, mount, floorPlan);

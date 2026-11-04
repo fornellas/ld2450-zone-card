@@ -148,6 +148,44 @@ describe("discover", () => {
     ]);
   });
 
+  describe("xy unfiltered button", () => {
+    const button = (id: string, device: string | null, icon: string | undefined = "mdi:filter-off"): MockEntity => ({
+      id,
+      device,
+      state: "unknown",
+      attributes: icon === undefined ? {} : { icon },
+    });
+
+    it("finds the button by its default icon, among the device's other buttons", () => {
+      const hass = mockHass({ dev1: "Living Room" }, [
+        ...livingRoom(),
+        button("button.lr_xy_unfiltered", "dev1"),
+        button("button.lr_restart", "dev1", "mdi:restart"),
+        button("button.other_xy_unfiltered", "dev2"),
+      ]);
+      expect(discover(hass)[0].xyUnfilteredButton).toBe("button.lr_xy_unfiltered");
+    });
+
+    it("is optional", () => {
+      expect(discover(mockHass({ dev1: "Living Room" }, livingRoom()))[0].xyUnfilteredButton).toBeUndefined();
+    });
+
+    it("doesn't guess between several buttons, nor without the icon", () => {
+      const hass = mockHass({ dev1: "Living Room" }, [
+        ...livingRoom(),
+        button("button.a", "dev1"),
+        button("button.b", "dev1"),
+        button("button.c", "dev1", undefined),
+      ]);
+      expect(discover(hass)[0].xyUnfilteredButton).toBeUndefined();
+    });
+
+    it("takes the button from the config", () => {
+      const hass = mockHass({ dev1: "Living Room" }, [...livingRoom(), button("button.mine", "dev1", undefined)]);
+      expect(discover(hass, { xy_unfiltered: "button.mine" })[0].xyUnfilteredButton).toBe("button.mine");
+    });
+  });
+
   it("finds nothing without polygon zones", () => {
     const hass = mockHass({ dev1: "Living Room" }, livingRoom().slice(2));
     expect(discover(hass)).toEqual([]);
