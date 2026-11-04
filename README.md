@@ -168,10 +168,11 @@ text_sensor:
       xy:
         name: Target-3 XY
 
-# Optional, and not in an ESPHome release yet (esphome/esphome#22285): pressing this button makes the xy text sensors publish every position the radar reports (up to 10 per
-# second) for the next 10 seconds, ignoring their filters. The card presses it every 3 seconds while it's visible, for
-# a smooth map and a trail with every position. When no card is open, the filters apply again by themselves, so
-# Home Assistant only gets the extra updates while someone looks. Keep its default icon, so the card finds it.
+# Optional, and not in an ESPHome release yet (esphome/esphome#22285). Pressing this button makes the xy text sensors
+# publish every position the radar reports (up to 10 per second) for the next 10 seconds, ignoring their filters. The
+# card presses it every 3 seconds while it's visible, for a smooth map and a trail with every position. When no card
+# is open, the filters apply again by themselves, so Home Assistant only gets the extra updates while someone looks.
+# Keep its default icon, so the card finds it.
 button:
   - platform: ld2450
     ld2450_id: ld2450_radar
