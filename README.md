@@ -30,7 +30,9 @@ evaluated on the device.
 - **Zones:** the selected zone is highlighted, the others are dashed, and occupied zones (from their presence
   sensors) are filled.
 - **Targets:** live positions of up to three people, also listed under the map. Each position comes from one radar
-  frame, as the `xy` text sensor of a target publishes its `x` and `y` together.
+  frame, as the `xy` text sensor of a target publishes its `x` and `y` together. With the optional `xy_unfiltered`
+  button (see [ESPHome configuration](#esphome-configuration)), the card gets every position the radar reports while
+  it's visible, instead of one a second.
 - **Toggle anything** by clicking it in the legend: tracking range, floor plan, selected zone, occupied and targets.
   The choice is saved per user.
 - **Fits what's shown:** the map zooms to the visible items, targets and trail.
@@ -53,7 +55,7 @@ evaluated on the device.
 
 - **Trail:** while on, every position where a target is seen is kept (the last 7,000 per device) and drawn on the map,
   so you can see where people actually walk, sit or stand. It's off on every page load. It records the same
-  positions as the map shows.
+  positions as the map shows: with the `xy_unfiltered` button, all of them.
 - **Fit zone to trail:** turns the trail into a zone around all its points, keeping a margin you choose to each. It's
   a normal edit, so it can be undone and adjusted before saving.
 
@@ -151,9 +153,8 @@ binary_sensor:
         name: Desk Occupied
 
 # Target positions, drawn live on the card's map, each as "x,y" in mm (or "NA" without a target), with x and y from the
-# same radar frame. Keep their default icon, so the card finds them, and name them "Target N XY". A position is
-# published at most once per `throttle` (1 s by default): lower it for a smoother map, at the cost of more state
-# updates sent to Home Assistant.
+# same radar frame. Keep their default icon, so the card finds them, and name them "Target N XY". By default, a
+# position is published at most once per `throttle` (1 s): see the optional xy_unfiltered button below for more.
 text_sensor:
   - platform: ld2450
     ld2450_id: ld2450_radar
@@ -166,7 +167,20 @@ text_sensor:
     target_3:
       xy:
         name: Target-3 XY
+
+# Optional, and not in an ESPHome release yet (esphome/esphome#22285): pressing this button makes the xy text sensors publish every position the radar reports (up to 10 per
+# second) for the next 10 seconds, ignoring their filters. The card presses it every 3 seconds while it's visible, for
+# a smooth map and a trail with every position. When no card is open, the filters apply again by themselves, so
+# Home Assistant only gets the extra updates while someone looks. Keep its default icon, so the card finds it.
+button:
+  - platform: ld2450
+    ld2450_id: ld2450_radar
+    xy_unfiltered:
+      name: XY Unfiltered
 ```
+
+Each press is a state change in Home Assistant, as for any button: you may want to
+[exclude](https://www.home-assistant.io/integrations/recorder/#configure-filter) the button from the recorder.
 
 Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch Occupied`) and the card pairs them
 automatically. Other names are paired by the words they share, and a zone that matches more than one sensor equally
@@ -186,9 +200,11 @@ entities. Discovery relies on these defaults:
   `unavailable`. Targets are numbered by the number in their names (for example `Target-1 XY`), or by name order.
 - **Presence sensors:** `binary_sensor` entities on the same device as the zones, with `device_class: occupancy` and
   no icon, paired with their zones by name (see above).
+- **`xy_unfiltered` button:** the only `button` entity on the same device as the zones with the icon `mdi:filter-off`.
+  It's optional: without it the card works as before.
 
 Changing an icon or device class in your ESPHome YAML or in Home Assistant hides that entity from discovery. Name it in
-the `targets:` (`xy` text sensors) or `zones:` (presence sensors) option instead.
+the `targets:` (`xy` text sensors), `xy_unfiltered:` (button) or `zones:` (presence sensors) option instead.
 
 Every option can be set in the card's visual editor, or in YAML. They're all optional, and override automatic
 discovery:
@@ -199,6 +215,7 @@ title: Living room radar # card title
 device_id: 0123456789abcdef # only show this device
 targets: # the target xy text sensors
   - xy: sensor.living_room_target_1_xy
+xy_unfiltered: button.living_room_xy_unfiltered # the button that turns the xy filters off while the card is visible
 zones: # pair a zone with its presence sensor
   - polygon: text.living_room_couch_zone
     presence: binary_sensor.living_room_couch_occupied
