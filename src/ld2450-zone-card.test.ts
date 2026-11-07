@@ -625,6 +625,25 @@ describe("ld2450-zone-card", () => {
       expect(circles()).toBe(3);
     });
 
+    it("remembers when each position was seen, and colors them by it", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const { root, map, move, toggle } = await withTrail();
+        await toggle(true);
+        vi.setSystemTime(new Date("2026-11-07T10:00:00"));
+        await move(100, 1000);
+        vi.setSystemTime(new Date("2026-11-07T10:30:00"));
+        await move(200, 1100);
+        vi.setSystemTime(new Date("2026-11-07T11:00:00"));
+        await move(300, 1200);
+        const strokes = [...map.shadowRoot!.querySelectorAll(".trail circle")].map((c) => c.getAttribute("stroke"));
+        expect(new Set(strokes).size).toBe(3);
+        expect(root.querySelector(".age-scale")).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("clears with the button, and when turned off", async () => {
       const { root, circles, move, toggle, update } = await withTrail();
       await toggle(true);
@@ -747,6 +766,22 @@ describe("ld2450-zone-card", () => {
         expect(mapCount(root, ".trail circle")).toBe(3);
         expect(mapCount(root, "g.target")).toBe(0);
         expect(root.querySelector(".history-range")!.parentElement!.textContent).toContain("3 positions");
+      });
+
+      it("shows the colors of the positions' age, with the times they stand for", async () => {
+        const root = await renderCard({}, withHistory(recorded));
+        await showMode(root, "History");
+        const scale = root.querySelector(".age-scale")!;
+        expect(scale.querySelectorAll("span")).toHaveLength(3);
+        expect(scale.querySelector(".bar")!.getAttribute("style")).toContain("linear-gradient");
+        // The oldest recorded position is colder than the newest
+        const strokes = [...root.querySelector("ld2450-zone-map")!.shadowRoot!.querySelectorAll(".trail circle")].map(
+          (c) => c.getAttribute("stroke"),
+        );
+        expect(new Set(strokes).size).toBe(3);
+        await showMode(root, "Live");
+        expect(root.querySelector(".age-scale")).toBeNull();
+        root.host.remove();
       });
 
       it("loads again when the period changes", async () => {

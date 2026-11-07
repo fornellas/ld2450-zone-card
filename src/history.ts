@@ -1,7 +1,7 @@
 // Past target positions, from the history Home Assistant recorded for the "xy" text sensors.
 
 import type { HomeAssistant } from "./ha-types";
-import type { Point } from "./polygon";
+import type { TrackPoint } from "./age-color";
 import { parseXY } from "./targets";
 
 /** A state in the compressed format of the history websocket API (minimal_response, no_attributes). */
@@ -22,20 +22,20 @@ export interface HistoryState {
 export function historyPoints(
   history: Record<string, HistoryState[]>,
   max: number,
-): { points: Point[]; truncated: boolean } {
-  const found: { time: number; point: Point }[] = [];
+): { points: TrackPoint[]; truncated: boolean } {
+  const found: TrackPoint[] = [];
   for (const states of Object.values(history)) {
     let last: string | undefined;
     for (const state of states) {
       if (state.s === last) continue;
       last = state.s;
       const point = parseXY(state.s);
-      if (point !== undefined) found.push({ time: state.lu ?? state.lc ?? 0, point });
+      if (point !== undefined) found.push({ ...point, time: (state.lu ?? state.lc ?? 0) * 1000 });
     }
   }
   // A stable sort, so the points of the same time stay in the order of their targets
   found.sort((a, b) => a.time - b.time);
-  return { points: found.slice(-max).map((f) => f.point), truncated: found.length > max };
+  return { points: found.slice(-max), truncated: found.length > max };
 }
 
 /** Where the targets of the xy sensors were between two times, per Home Assistant's recorder. */
@@ -45,7 +45,7 @@ export async function fetchTargetHistory(
   start: Date,
   end: Date,
   max: number,
-): Promise<{ points: Point[]; truncated: boolean }> {
+): Promise<{ points: TrackPoint[]; truncated: boolean }> {
   if (entityIds.length === 0) return { points: [], truncated: false };
   const history = await hass.callWS<Record<string, HistoryState[]>>({
     type: "history/history_during_period",

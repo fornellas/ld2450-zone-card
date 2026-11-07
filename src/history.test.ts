@@ -22,9 +22,9 @@ describe("historyPoints", () => {
     );
     expect(truncated).toBe(false);
     expect(points).toEqual([
-      { x: 100, y: 1000 },
-      { x: -500, y: 2000 },
-      { x: 200, y: 1100 },
+      { x: 100, y: 1000, time: 2000 },
+      { x: -500, y: 2000, time: 4000 },
+      { x: 200, y: 1100, time: 6000 },
     ]);
   });
 
@@ -32,8 +32,8 @@ describe("historyPoints", () => {
     const states = [1, 2, 3, 4].map((n) => ({ s: `${n},${n}`, lu: n }));
     expect(historyPoints({ a: states }, 2)).toEqual({
       points: [
-        { x: 3, y: 3 },
-        { x: 4, y: 4 },
+        { x: 3, y: 3, time: 3000 },
+        { x: 4, y: 4, time: 4000 },
       ],
       truncated: true,
     });
@@ -57,7 +57,7 @@ describe("fetchTargetHistory", () => {
       new Date("2026-11-07T11:00:00Z"),
       10,
     );
-    expect(points).toEqual({ points: [{ x: 1, y: 2 }], truncated: false });
+    expect(points).toEqual({ points: [{ x: 1, y: 2, time: 1000 }], truncated: false });
     expect(request).toMatchObject({
       type: "history/history_during_period",
       start_time: "2026-11-07T10:00:00.000Z",

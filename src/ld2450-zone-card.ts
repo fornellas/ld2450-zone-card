@@ -3,6 +3,7 @@ import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
 import { insidePolygon, perimeter } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
+import { type TrackPoint, ageGradient, formatMoment, timeRange } from "./age-color";
 import { fetchTargetHistory, toLocalInput } from "./history";
 import { fetchEntityIdParts } from "./naming";
 import {
@@ -187,7 +188,7 @@ export class Ld2450ZoneCard extends LitElement {
    */
   private _mode: TargetsMode = "live";
   /** The recorded positions of the History view for a device, once loaded. */
-  private _past?: { device: string; points: Point[]; loading: boolean; truncated?: boolean; error?: string };
+  private _past?: { device: string; points: TrackPoint[]; loading: boolean; truncated?: boolean; error?: string };
   /** The period of the History view, as the datetime-local inputs have it. */
   private _historyStart = "";
   private _historyEnd = "";
@@ -198,7 +199,7 @@ export class Ld2450ZoneCard extends LitElement {
   private _marginText?: string;
   private _marginSaveTimer?: ReturnType<typeof setTimeout>;
   /** Where targets have been seen while the trail is on, in radar coordinates, by device. Kept in this page only. */
-  private _trails: Record<string, Point[]> = {};
+  private _trails: Record<string, TrackPoint[]> = {};
   /** The last position recorded for each target, so a target standing still isn't recorded again and again. */
   private _trailLast: Record<string, Record<string, string>> = {};
   /** The shown device's unfiltered button, and what stops pressing it. */
@@ -847,6 +848,23 @@ export class Ld2450ZoneCard extends LitElement {
               </div>`
             : this._renderHistory()
       }
+      ${this._mode === "live" ? nothing : this._renderAgeScale(track)}
+    `;
+  }
+
+  /** The colors of the trail and history, from the oldest position to the newest, with the times they stand for. */
+  private _renderAgeScale(points: TrackPoint[]) {
+    const range = timeRange(points);
+    if (range === undefined) return nothing;
+    return html`
+      <div
+        class="age-scale"
+        title="The color of each position is how long ago it was seen: cold for the oldest, warm for the newest"
+      >
+        <span>${formatMoment(range.from, range)}</span>
+        <span class="bar" style="background: ${ageGradient()}"></span>
+        <span>${formatMoment(range.to, range)}</span>
+      </div>
     `;
   }
 
@@ -1016,7 +1034,7 @@ export class Ld2450ZoneCard extends LitElement {
       if (last[target.label] === key) continue;
       last[target.label] = key;
       // A new array, so the map redraws
-      trail = [...trail, target.point].slice(-MAX_TRAIL);
+      trail = [...trail, { ...target.point, time: Date.now() }].slice(-MAX_TRAIL);
     }
     this._trails[deviceId] = trail;
   }
@@ -1032,7 +1050,7 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   /** The points the map shows besides the live targets: the trail, or the history. */
-  private _track(deviceId: string): Point[] {
+  private _track(deviceId: string): TrackPoint[] {
     if (this._mode === "trail") return this._trails[deviceId] ?? [];
     if (this._mode === "history") return this._past?.points ?? [];
     return [];
@@ -1563,6 +1581,20 @@ export class Ld2450ZoneCard extends LitElement {
     .warn {
       margin: 4px 0 0;
       color: var(--warning-color);
+    }
+    .age-scale {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0 4px;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      font-variant-numeric: tabular-nums;
+    }
+    .age-scale .bar {
+      flex: 1;
+      height: 8px;
+      border-radius: 4px;
     }
     .history-range {
       display: flex;

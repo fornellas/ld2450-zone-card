@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { ageColor } from "./age-color";
 import { describe, expect, it } from "vitest";
 import "./zone-map";
 import type { Ld2450ZoneMap } from "./zone-map";
@@ -136,7 +137,7 @@ describe("ld2450-zone-map fitting targets and trail", () => {
       const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
       map.overlays = { trackingRange: false, floorPlan: false };
       map.targets = [{ label: "1", name: "Target 1", point }];
-      map.trail = [point];
+      map.trail = [{ ...point, time: 0 }];
       map.trailShown = true;
       // As if it were 400 pixels wide
       (map as unknown as { _widthPx: number })._widthPx = 400;
@@ -151,6 +152,21 @@ describe("ld2450-zone-map fitting targets and trail", () => {
     expect(new Set(sizes)).toEqual(new Set([8]));
   });
 
+  it("colors the trail by age, from the oldest to the newest position", async () => {
+    const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+    map.overlays = { trackingRange: false, floorPlan: false };
+    map.trail = [
+      { x: 0, y: 1000, time: 1000 },
+      { x: 100, y: 1100, time: 2000 },
+      { x: 200, y: 1200, time: 3000 },
+    ];
+    map.trailShown = true;
+    document.body.appendChild(map);
+    await map.updateComplete;
+    const strokes = [...map.shadowRoot!.querySelectorAll(".trail circle")].map((c) => c.getAttribute("stroke"));
+    expect(strokes).toEqual([ageColor(0), ageColor(0.5), ageColor(1)]);
+  });
+
   it("zooms out to keep targets in view", async () => {
     const without = await width(() => undefined);
     const withTarget = await width((map) => (map.targets = [{ label: "1", name: "Target 1", point: far }]));
@@ -158,9 +174,9 @@ describe("ld2450-zone-map fitting targets and trail", () => {
   });
 
   it("zooms out to keep the trail in view, while it's shown", async () => {
-    const hidden = await width((map) => (map.trail = [far]));
+    const hidden = await width((map) => (map.trail = [{ ...far, time: 0 }]));
     const shown = await width((map) => {
-      map.trail = [far];
+      map.trail = [{ ...far, time: 0 }];
       map.trailShown = true;
     });
     expect(shown).toBeGreaterThan(hidden);
@@ -179,7 +195,7 @@ describe("ld2450-zone-map drawing order", () => {
     map.draft = zone;
     map.zones = [{ name: "Couch", points: zone, selected: true, occupied: true }];
     map.targets = [{ label: "1", name: "Target 1", point: { x: 0, y: 1500 } }];
-    map.trail = [{ x: 100, y: 1500 }];
+    map.trail = [{ x: 100, y: 1500, time: 0 }];
     map.trailShown = true;
     document.body.appendChild(map);
     await map.updateComplete;

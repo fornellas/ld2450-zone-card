@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing, svg } from "lit";
 import { DETECTION_AREA } from "./detection-area";
 import { distance, insertionIndex, snap } from "./geometry";
 import { POLYGON_MAX_POINTS, type Point } from "./polygon";
+import { type TrackPoint, ageColor, ageFraction, timeRange } from "./age-color";
 import type { TargetPosition } from "./targets";
 import type { Overlay } from "./user-settings";
 
@@ -119,7 +120,8 @@ export class Ld2450ZoneMap extends LitElement {
   /** Which overlays to show; see overlayShown() for the defaults. */
   overlays: Partial<Record<Overlay, boolean>> = {};
   /** Where targets have been seen, in radar coordinates. */
-  trail: Point[] = [];
+  /** Where the targets were seen, oldest first, drawn from a cold color for the oldest to a warm one for the newest. */
+  trail: TrackPoint[] = [];
   /** Show the trail. */
   trailShown = false;
   editable = false;
@@ -289,11 +291,13 @@ export class Ld2450ZoneMap extends LitElement {
   private _renderTrail() {
     if (!this.trailShown) return nothing;
     const r = this._targetRadius;
+    const range = timeRange(this.trail);
     return svg`
       <g class="trail">
         ${this.trail.map((point) => {
           const p = toRoom(point, this.mount);
-          return svg`<circle cx=${p.x} cy=${-p.y} r=${r}></circle>`;
+          // Oldest first, so the newest positions are drawn over the older ones
+          return svg`<circle cx=${p.x} cy=${-p.y} r=${r} stroke=${ageColor(ageFraction(point.time, range!))}></circle>`;
         })}
       </g>
     `;
@@ -663,9 +667,8 @@ export class Ld2450ZoneMap extends LitElement {
     }
     .trail circle {
       fill: none;
-      stroke: var(--accent-color, #ff9800);
-      stroke-width: 1;
-      stroke-opacity: 0.5;
+      stroke-width: 1.5;
+      stroke-opacity: 0.75;
       vector-effect: non-scaling-stroke;
     }
     .target circle {
