@@ -3,81 +3,36 @@
 A Home Assistant dashboard card to draw polygon zones for [ESPHome](https://esphome.io/) LD2450 radars. Zones are
 evaluated on the device.
 
-> As of 2026-10-27, this requires the dev version of esphome, as it contains the two required PRs
-> [esphome/esphome#21416](https://github.com/esphome/esphome/pull/21416) and
-> [esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154) that haven't made into a release yet.
-> 2026.11 release of esphome should contain both.
+> Requires ESPHome 2026.11 or later (beta or final), for the polygon zones
+> ([esphome/esphome#20154](https://github.com/esphome/esphome/pull/20154)) and the target `xy` text sensors
+> ([esphome/esphome#21416](https://github.com/esphome/esphome/pull/21416)). **Fast updates** also need
+> [esphome/esphome#22285](https://github.com/esphome/esphome/pull/22285), which isn't merged yet.
 
 <img src="https://raw.githubusercontent.com/fornellas/ld2450-zone-card/main/docs/screenshot.png" alt="The card editing an occupied zone, with the floor plan, the radar and a target" width="400">
 
 ## Features
 
-### Finding your radars
-
-- **Automatic discovery.** Every ESPHome device with LD2450 polygon zones is found and listed; pick the device and the
-  zone to edit at the top. Each zone's presence sensor and the targets' `xy` text sensors are found too.
-- **Names follow Home Assistant.** Devices are named with your _Entity ID format_ (Settings → System), for example
-  area and device.
-- **Overrides.** If anything isn't found automatically, the card config can name the entities (see
+- **Automatic discovery** of ESPHome LD2450 devices, their zones, presence sensors and target sensors, named after
+  your Home Assistant _Entity ID format_. Anything it can't find can be set in the card config (see
   [Configuration](#configuration)).
-- **Offline devices** are marked, and changes can't be saved until they're back.
-
-### The map
-
-- **Top-down view** of the room, with a grid in metric or imperial units (chosen per user).
-- **Tracking range:** where the radar can see, from the measured plot in the HLK-LD2450 manual.
-- **Floor plan:** an outline of the room you draw yourself.
-- **Zones:** the selected zone is highlighted, the others are dashed, and occupied zones (from their presence
-  sensors) are filled.
-- **Targets:** live positions of up to three people, also listed under the map. Each position comes from one radar
-  frame, as the `xy` text sensor of a target publishes its `x` and `y` together. With the optional `xy_unfiltered`
-  button (see [ESPHome configuration](#esphome-configuration)), the card gets every position the radar reports while
-  it's visible, instead of one a second.
-- **Toggle anything** by clicking it in the legend: tracking range, floor plan, selected zone, occupied and targets.
-  The choice is saved per user.
-- **Fits what's shown:** the map zooms to the visible items, targets and trail.
-
-### Editing zones
-
-- **Draw on the map:** click to add a point, click an edge to insert one, drag points to move them, and double-click
-  or use **Delete point** to remove them. Works with touch on phones.
-- **Type coordinates:** the selected point's X and Y can be typed in.
-- **Snapping:** to a grid with a configurable step, and to nearby points of the floor plan and other zones.
-- **Undo and redo**, with buttons or Ctrl+Z and Ctrl+Shift+Z (or Ctrl+Y). A whole drag is one step.
-- **Clear and Revert:** start over, or go back to what's on the device.
-- **Checks before saving:** too few or too many points (the firmware takes 3 to 23) are errors. Points outside the
-  tracking range are warnings.
-- **Save with confirmation:** the card writes the zone and waits for the device to report it back. If Home Assistant
-  or the device rejects it, for example because a point is outside the area the device accepts, the card says so and
-  keeps your drawing to fix and save again. An empty zone disables it.
-
-### Trail and automatic zones
-
-- **Trail:** while on, every position where a target is seen is kept (the last 7,000 per device) and drawn on the map,
-  so you can see where people actually walk, sit or stand. It's off on every page load. It records the same
-  positions as the map shows: with the `xy_unfiltered` button, all of them.
-- **Fit zone to trail:** turns the trail into a zone around all its points, keeping a margin you choose to each. It's
-  a normal edit, so it can be undone and adjusted before saving.
-
-### Radar position
-
-- **Upside down:** mirrors left and right, for radars mounted upside down.
-- **Rotation and X/Y position:** place the radar in the room. Only the radar and the targets move: zones and the floor
-  plan stay where they are on the map, which is the room.
-- The device keeps zones relative to the radar, so after moving the radar, the zones show as unsaved. Save each one
-  again, and the device follows. Until then, the device still uses the old values.
-- Shared by all users; only administrators can change it.
-
-### Floor plan
-
-- Pick **Floor plan** in the zone list to draw the room's outline, with the same tools as zones.
-- It stays where it's drawn when the radar moves, and is shared by all users; only administrators can save it.
-
-### Where settings are kept
-
-- **Per user** (HA user data): units, map toggles, snapping, the trail margin, the selected device and zone, and which
-  sections are open. The card comes back as you left it.
-- **Shared** (HA system data, Home Assistant 2025.12 or later): radar positions and floor plans.
+- **Draw zones on the map:** add, insert, drag and delete points (touch works too), or type coordinates. Snap to a
+  grid and to the points of the floor plan and other zones. Undo and redo.
+- **Safe saving:** zones are checked (the firmware takes 3 to 23 points, and points outside the tracking range are
+  warned about), written to the device, and confirmed when the device reports them back. If the save fails, your
+  drawing is kept to fix and save again.
+- **Live targets,** and with the optional `xy_unfiltered` button (see
+  [ESPHome configuration](#esphome-configuration)), **Fast updates:** every position the radar reports, instead of
+  one a second, while the card is visible.
+- **Trail and History:** see where people actually walk, sit or stand, from the positions seen since you opened
+  the Trail view, or from what Home Assistant recorded in a period (the last 7,000 positions; History needs the
+  recorder). **Fit zone to targets** turns the targets on the map into a zone around them, keeping a margin.
+- **Floor plan and radar position:** draw the room's outline, and place the radar in it (upside down, rotation, X/Y).
+  Only the radar and the targets move with it. The device keeps zones relative to the radar, so after moving it, save
+  the zones again. Shared by all users; only administrators can change them.
+- **Settings:** units, map toggles, snapping, the selected device and zone, and which sections are open are per user,
+  so the card comes back as you left it. Radar positions and floor plans are shared (Home Assistant 2025.12 or
+  later).
+- **Visual editor** for every option.
 
 ## Installation
 
@@ -114,11 +69,6 @@ type: custom:ld2450-zone-card
 A full example, with two zones and three targets:
 
 ```yaml
-# Only required before ESPHome 2026.11 is released: until then, take the ld2450 component from ESPHome's dev branch
-external_components:
-  - source: github://esphome/esphome@dev
-    components: [ld2450]
-
 uart:
   id: uart_ld2450
   # The LD2450's TX goes to the ESP's RX, and its RX to the ESP's TX. Use your board's pins.
@@ -168,11 +118,12 @@ text_sensor:
       xy:
         name: Target-3 XY
 
-# Optional, and not in an ESPHome release yet (esphome/esphome#22285). Pressing this button makes the xy text sensors
-# publish every position the radar reports (up to 10 per second) for the next 10 seconds, ignoring their filters. The
-# card presses it every 3 seconds while it's visible, for a smooth map and a trail with every position. When no card
-# is open, the filters apply again by themselves, so Home Assistant only gets the extra updates while someone looks.
-# Keep its default icon, so the card finds it.
+# Optional, for Fast updates. It needs esphome/esphome#22285, which isn't merged yet: until it is, ESPHome fails
+# to compile this block, so leave it out, or build ESPHome from that pull request. Pressing this button makes the xy
+# text sensors publish every position the radar reports (up to 10 per second) for the next 10 seconds, ignoring their
+# filters. The card presses it every 3 seconds while it's visible and its Fast updates switch is on, for a smooth map
+# and a trail with every position. When no card is open, the filters apply again by themselves, so Home Assistant only
+# gets the extra updates while someone looks. Keep its default icon, so the card finds it.
 button:
   - platform: ld2450
     ld2450_id: ld2450_radar
@@ -187,9 +138,9 @@ Name each presence sensor `<zone name> Occupied` (for example `Couch` and `Couch
 automatically. Other names are paired by the words they share, and a zone that matches more than one sensor equally
 well is left for you to pair in the [configuration](#configuration).
 
-Zones are checked on the device in the radar's own coordinates, and the `xy` sensors publish the same raw coordinates, so
-the card draws both on the same map. For a radar mounted upside down, use the card's **Upside down** option, not
-ESPHome filters.
+Zones are checked on the device in the radar's own coordinates, and the `xy` sensors publish the same raw
+coordinates, so the card draws both on the same map. For a radar mounted upside down, use the card's **Upside down**
+option, not ESPHome filters.
 
 ### Configuration
 
@@ -227,7 +178,7 @@ zones: # pair a zone with its presence sensor
 ```sh
 npm install
 npm run watch   # rebuilds dist/ld2450-zone-card.js on changes
-npm run check   # typecheck, format check, tests, build and a check that docs/screenshot.png is up to date (needs Chrome)
+npm run check   # typecheck, format check, tests, build, and a check that docs/screenshot.png is current (needs Chrome)
 npm run screenshot   # rebuilds docs/screenshot.png from the current code (set CHROME_PATH if Chrome isn't found)
 ```
 
