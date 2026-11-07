@@ -644,6 +644,36 @@ describe("ld2450-zone-card", () => {
       }
     });
 
+    it("records by default, and stops adding positions when turned off, keeping the ones seen", async () => {
+      const { root, circles, move, toggle, update } = await withTrail();
+      await toggle(true);
+      const record = root.querySelector<HTMLInputElement>(".track-actions .record input")!;
+      expect(record.checked).toBe(true);
+      await move(100, 1000);
+      expect(circles()).toBe(1);
+      record.checked = false;
+      record.dispatchEvent(new Event("change"));
+      await update();
+      expect(root.querySelector("details.targets-details .help")!.textContent).toContain("Paused");
+      await move(200, 1100);
+      await move(300, 1200);
+      expect(circles()).toBe(1);
+      record.checked = true;
+      record.dispatchEvent(new Event("change"));
+      await update();
+      // Where the target is when it starts again is recorded, and then the next positions
+      expect(circles()).toBe(2);
+      await move(400, 1300);
+      expect(circles()).toBe(3);
+      // Back on whenever the Trail view is opened
+      record.checked = false;
+      record.dispatchEvent(new Event("change"));
+      await update();
+      await toggle(false);
+      await toggle(true);
+      expect(root.querySelector<HTMLInputElement>(".track-actions .record input")!.checked).toBe(true);
+    });
+
     it("clears with the button, and when turned off", async () => {
       const { root, circles, move, toggle, update } = await withTrail();
       await toggle(true);
@@ -709,7 +739,7 @@ describe("ld2450-zone-card", () => {
       const section = root.querySelector("details.targets-details")!;
       expect(modes(root)[1]).toEqual(["Trail", "true"]);
       expect(section.querySelector(".targets")).toBeNull();
-      expect(section.querySelector(".target-modes")!.nextElementSibling!.querySelector("button.clear")).not.toBeNull();
+      expect(section.querySelector(".target-modes ~ .track-actions button.clear")).not.toBeNull();
       expect(root.querySelector("details.edit .clear")).toBeNull();
     });
 

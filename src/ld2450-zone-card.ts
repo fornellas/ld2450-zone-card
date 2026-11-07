@@ -145,6 +145,7 @@ export class Ld2450ZoneCard extends LitElement {
     _pointText: { state: true },
     _history: { state: true },
     _mode: { state: true },
+    _recording: { state: true },
     _past: { state: true },
     _historyStart: { state: true },
     _historyEnd: { state: true },
@@ -187,6 +188,8 @@ export class Ld2450ZoneCard extends LitElement {
    * Home Assistant recorded them in a period. Live on every load.
    */
   private _mode: TargetsMode = "live";
+  /** Whether the trail adds the positions seen. On each time the Trail view is opened. */
+  private _recording = true;
   /** The recorded positions of the History view for a device, once loaded. */
   private _past?: { device: string; points: TrackPoint[]; loading: boolean; truncated?: boolean; error?: string };
   /** The period of the History view, as the datetime-local inputs have it. */
@@ -420,7 +423,7 @@ export class Ld2450ZoneCard extends LitElement {
     const floorPlanLabel = this._floorPlanDirty(device.id, floorPlan) ? "Floor plan (unsaved)" : "Floor plan";
     const targets = readTargets(this.hass!, device.targets);
     this._currentSensors = device.targets.map((t) => t.xy);
-    if (this._mode === "trail") this._recordTrail(device.id, targets);
+    if (this._mode === "trail" && this._recording) this._recordTrail(device.id, targets);
     return html`
       <div class="selectors">
         <label>
@@ -840,12 +843,26 @@ export class Ld2450ZoneCard extends LitElement {
         this._mode === "live"
           ? this._renderTargetPositions(targets, mount, offline)
           : this._mode === "trail"
-            ? html`<div class="track-actions">
-                <p class="help">Where the targets are seen while this view is open.</p>
-                <button class="clear" ?disabled=${track.length === 0} @click=${() => this._clearTrail(device.id)}>
-                  Clear
-                </button>
-              </div>`
+            ? html`<p class="help">
+                  ${
+                    this._recording
+                      ? "Where the targets are seen while this view is open."
+                      : "Paused: the positions seen so far are kept, and no new ones are added."
+                  }
+                </p>
+                <div class="track-actions">
+                  <label class="check record" title="Turn off to stop adding positions, keeping the ones seen so far">
+                    <input
+                      type="checkbox"
+                      .checked=${this._recording}
+                      @change=${(ev: Event) => (this._recording = (ev.target as HTMLInputElement).checked)}
+                    />
+                    Record trail
+                  </label>
+                  <button class="clear" ?disabled=${track.length === 0} @click=${() => this._clearTrail(device.id)}>
+                    Clear
+                  </button>
+                </div>`
             : this._renderHistory()
       }
       ${this._mode === "live" ? nothing : this._renderAgeScale(track)}
@@ -1066,6 +1083,8 @@ export class Ld2450ZoneCard extends LitElement {
     // The trail starts afresh each time it's turned on
     if (this._mode === "trail") this._clearTrail();
     this._mode = mode;
+    // The trail always starts recording
+    this._recording = true;
     if (mode === "history" && this._historyStart === "") {
       const now = new Date();
       this._historyEnd = toLocalInput(now);
