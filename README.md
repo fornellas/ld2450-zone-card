@@ -24,9 +24,10 @@ evaluated on the device.
   [ESPHome configuration](#esphome-configuration)), **Fast updates:** every position the radar reports, instead of
   one a second, while the card is visible.
 - **Trail and History:** see where people actually walk, sit or stand, from the positions seen since you opened
-  the Trail view, or from what Home Assistant recorded in a period (the last 7,000 positions; History needs the
-  recorder). Positions are colored by age, from dark purple for the oldest to yellow for the newest, with a scale
-  showing the times. **Fit zone to targets** turns the targets on the map into a zone around them, keeping a margin.
+  the Trail view (which you can pause), or from what Home Assistant recorded in a period (the last 7,000 positions;
+  History needs the recorder). Positions are colored by age, from dark purple for the oldest to yellow for the
+  newest, with a scale showing the times. **Fit zone to targets** turns the targets on the map into a zone around
+  them, keeping a margin.
 - **Floor plan and radar position:** draw the room's outline, and place the radar in it (upside down, rotation, X/Y).
   Only the radar and the targets move with it. The device keeps zones relative to the radar, so after moving it, save
   the zones again. Shared by all users; only administrators can change them.
