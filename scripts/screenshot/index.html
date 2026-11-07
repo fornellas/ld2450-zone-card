@@ -130,10 +130,15 @@
         icon: "mdi:crosshairs-gps",
       });
 
+      add("button.xy_unfiltered", "unknown", {
+        friendly_name: "Fabio's Office Occupancy XY Unfiltered",
+        icon: "mdi:filter-off",
+      });
+
       const userSettings = {
         units: "metric",
         overlays: { trackingRange: false },
-        sections: { edit: true, radar: true, entities: false },
+        sections: { edit: true, targets: true, radar: true, entities: false },
       };
       const systemSettings = {
         mounts: { office: mount },

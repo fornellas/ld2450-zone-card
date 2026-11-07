@@ -66,7 +66,7 @@ try {
   await page.waitForFunction(() => {
     const root = document.querySelector("ld2450-zone-card")?.shadowRoot;
     const map = root?.querySelector("ld2450-zone-map")?.shadowRoot;
-    return map?.querySelector("g.zone") != null && root.querySelectorAll("details[open]").length === 2;
+    return map?.querySelector("g.zone") != null && root.querySelectorAll("details[open]").length === 3;
   });
   await page.evaluate(() => document.fonts.ready);
   await card.screenshot({ path: output, omitBackground: true });

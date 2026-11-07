@@ -545,12 +545,14 @@ describe("ld2450-zone-card", () => {
       };
       const move = (x: number, y: number) => setState(`${x},${y}`);
       const idle = () => setState("NA");
-      const toggle = async (on: boolean) => {
-        const input = root.querySelector<HTMLInputElement>(".trail input")!;
-        input.checked = on;
-        input.dispatchEvent(new Event("change"));
+      const showMode = async (mode: string) => {
+        const button = [...root.querySelectorAll<HTMLButtonElement>(".target-modes button")].find((b) =>
+          b.textContent!.includes(mode),
+        )!;
+        button.click();
         await update();
       };
+      const toggle = (on: boolean) => showMode(on ? "Trail" : "Live");
       await update();
       // Start without a target, so the trail begins empty
       await idle();
@@ -565,9 +567,9 @@ describe("ld2450-zone-card", () => {
       await move(500, 2000);
       const button = (label: string) =>
         [...root.querySelectorAll("button")].find((b) => b.textContent!.includes(label)) as HTMLButtonElement;
-      const margin = root.querySelector(".trail .margin input") as HTMLInputElement;
+      const margin = root.querySelector(".margin-row input") as HTMLInputElement;
       expect(margin.value).toBe("0.3");
-      button("Fit zone to trail").click();
+      button("Fit zone to targets").click();
       await update();
       const value = drawn(root);
       const points = value.split(";").map((p) => p.split(",").map(Number));
@@ -584,12 +586,13 @@ describe("ld2450-zone-card", () => {
     it("isn't offered for the floor plan", async () => {
       const { root, toggle, update } = await withTrail();
       await toggle(true);
-      expect(root.querySelector(".trail .fit")).not.toBeNull();
+      expect(root.querySelector(".edit-toolbar .fit")).not.toBeNull();
       const select = root.querySelectorAll("select")[1];
       select.value = "floor-plan";
       select.dispatchEvent(new Event("change"));
       await update();
-      expect(root.querySelector(".trail .fit")).toBeNull();
+      expect(root.querySelector(".edit-toolbar .fit")).toBeNull();
+      expect(root.querySelector(".margin-row")).toBeNull();
     });
 
     it("is off until turned on", async () => {
@@ -626,7 +629,7 @@ describe("ld2450-zone-card", () => {
       const { root, circles, move, toggle, update } = await withTrail();
       await toggle(true);
       await move(100, 1000);
-      (root.querySelector(".trail button.clear") as HTMLButtonElement).click();
+      (root.querySelector(".track-actions button.clear") as HTMLButtonElement).click();
       await update();
       expect(circles()).toBe(0);
       await move(200, 1100);
@@ -639,6 +642,191 @@ describe("ld2450-zone-card", () => {
       await move(300, 1200);
       expect(circles()).toBe(2);
     });
+  });
+
+  describe("targets view", () => {
+    const modes = (root: ShadowRoot) =>
+      [...root.querySelectorAll<HTMLButtonElement>(".target-modes button")].map((b) => [
+        b.textContent!.trim(),
+        b.getAttribute("aria-pressed"),
+      ]);
+    const showMode = async (root: ShadowRoot, mode: string) => {
+      [...root.querySelectorAll<HTMLButtonElement>(".target-modes button")]
+        .find((b) => b.textContent!.includes(mode))!
+        .click();
+      await settle(root);
+    };
+    /** Wait for what a change loads, and for the card and the map to render it. */
+    async function settle(root: ShadowRoot) {
+      const card = root.host as Ld2450ZoneCard;
+      await card.updateComplete;
+      await new Promise((resolve) => setTimeout(resolve));
+      await card.updateComplete;
+      await (root.querySelector("ld2450-zone-map") as unknown as { updateComplete: Promise<unknown> }).updateComplete;
+    }
+    const mapCount = (root: ShadowRoot, selector: string) =>
+      root.querySelector("ld2450-zone-map")!.shadowRoot!.querySelectorAll(selector).length;
+
+    it("shows the live targets first, below the selector", async () => {
+      const root = await renderCard({}, hass());
+      expect(modes(root)).toEqual([
+        ["Live", "true"],
+        ["Trail", "false"],
+        ["History", "false"],
+      ]);
+      const section = root.querySelector("details.targets-details")!;
+      expect(section.querySelector(".target-modes")!.nextElementSibling).toBe(section.querySelector(".targets"));
+      expect(section.querySelector(".targets")!.textContent).toContain("Target 1");
+      expect(section.querySelector(".track-actions")).toBeNull();
+      expect(section.querySelector(".history-range")).toBeNull();
+      // The trail's controls moved here from Edit
+      expect(root.querySelector("details.edit input[type=checkbox][class=trail]")).toBeNull();
+      expect(root.querySelector("details.edit .clear.trail, details.edit .track-actions")).toBeNull();
+    });
+
+    it("has the trail's Clear button below the selector, and no target list", async () => {
+      const root = await renderCard({}, hass());
+      await showMode(root, "Trail");
+      const section = root.querySelector("details.targets-details")!;
+      expect(modes(root)[1]).toEqual(["Trail", "true"]);
+      expect(section.querySelector(".targets")).toBeNull();
+      expect(section.querySelector(".target-modes")!.nextElementSibling!.querySelector("button.clear")).not.toBeNull();
+      expect(root.querySelector("details.edit .clear")).toBeNull();
+    });
+
+    it("fits the zone to the live targets", async () => {
+      const root = await renderCard({}, hass());
+      const fit = [...root.querySelectorAll("button")].find((b) => b.textContent!.includes("Fit zone to targets"))!;
+      expect(fit.disabled).toBe(false);
+      fit.click();
+      await settle(root);
+      // Around the live target at x -782, y 1713, a margin beyond it
+      const points = drawn(root)
+        .split(";")
+        .map((p) => p.split(",").map(Number));
+      expect(points.length).toBeGreaterThanOrEqual(3);
+      expect(Math.min(...points.map(([x]) => x))).toBeLessThanOrEqual(-782 - 300);
+    });
+
+    describe("history", () => {
+      let requests: Record<string, unknown>[] = [];
+      let response: unknown;
+      function withHistory(result: unknown) {
+        requests = [];
+        response = result;
+        const h = hass();
+        const callWS = h.callWS;
+        h.callWS = <T>(msg: { type: string; [key: string]: unknown }) => {
+          if (msg.type !== "history/history_during_period") return callWS<T>(msg);
+          requests.push(msg);
+          return response instanceof Error ? Promise.reject(response) : Promise.resolve(response as T);
+        };
+        return h;
+      }
+      const recorded = {
+        "sensor.t1_xy": [
+          { s: "NA", lu: 1 },
+          { s: "-500,1000", lu: 2 },
+          { s: "500,1500", lu: 3 },
+          { s: "1000,2000", lu: 4 },
+        ],
+      };
+      const input = (root: ShadowRoot, index: number) =>
+        root.querySelectorAll<HTMLInputElement>(".history-range input")[index];
+
+      it("draws the recorded positions instead of the live targets, for the last hour by default", async () => {
+        const root = await renderCard({}, withHistory(recorded));
+        expect(mapCount(root, "g.target")).toBe(1);
+        await showMode(root, "History");
+        expect(input(root, 0).type).toBe("datetime-local");
+        const from = new Date(input(root, 0).value).getTime();
+        const to = new Date(input(root, 1).value).getTime();
+        expect(to - from).toBe(60 * 60 * 1000);
+        expect(requests).toHaveLength(1);
+        expect(requests[0]).toMatchObject({ entity_ids: ["sensor.t1_xy"], minimal_response: true });
+        expect(mapCount(root, ".trail circle")).toBe(3);
+        expect(mapCount(root, "g.target")).toBe(0);
+        expect(root.querySelector(".history-range")!.parentElement!.textContent).toContain("3 positions");
+      });
+
+      it("loads again when the period changes", async () => {
+        const root = await renderCard({}, withHistory(recorded));
+        await showMode(root, "History");
+        const from = input(root, 0);
+        from.value = "2026-01-01T08:00";
+        from.dispatchEvent(new Event("change"));
+        await settle(root);
+        expect(requests).toHaveLength(2);
+        expect(requests[1].start_time).toBe(new Date("2026-01-01T08:00").toISOString());
+      });
+
+      it("says so when nothing was recorded, when the period is wrong, and when Home Assistant fails", async () => {
+        const empty = await renderCard({}, withHistory({}));
+        await showMode(empty, "History");
+        expect(empty.textContent).toContain("No positions recorded");
+        empty.host.remove();
+
+        const root = await renderCard({}, withHistory(recorded));
+        await showMode(root, "History");
+        const to = input(root, 1);
+        to.value = "2000-01-01T00:00";
+        to.dispatchEvent(new Event("change"));
+        await settle(root);
+        expect(root.querySelector(".history-range")!.parentElement!.querySelector(".error")!.textContent).toContain(
+          "before the end",
+        );
+        root.host.remove();
+
+        const failing = await renderCard({}, withHistory(new Error("no recorder")));
+        await showMode(failing, "History");
+        expect(failing.querySelector(".error")!.textContent).toContain("no recorder");
+        failing.host.remove();
+      });
+
+      it("shows at most as many positions as the trail keeps, and warns when there were more", async () => {
+        const many = Array.from({ length: 7001 }, (_, n) => ({ s: `${n % 900},${1000 + n}`, lu: n + 1 }));
+        const root = await renderCard({}, withHistory({ "sensor.t1_xy": many }));
+        await showMode(root, "History");
+        expect(mapCount(root, ".trail circle")).toBe(7000);
+        expect(root.querySelector(".warn")!.textContent).toContain("most recent 7,000 positions");
+        root.host.remove();
+        const few = await renderCard({}, withHistory(recorded));
+        await showMode(few, "History");
+        expect(few.querySelector(".warn")).toBeNull();
+        few.host.remove();
+      });
+
+      it("fits the zone to the recorded positions, and goes back to the live targets", async () => {
+        const root = await renderCard({}, withHistory(recorded));
+        await showMode(root, "History");
+        const fit = [...root.querySelectorAll("button")].find((b) => b.textContent!.includes("Fit zone to targets"))!;
+        fit.click();
+        await settle(root);
+        const points = drawn(root)
+          .split(";")
+          .map((p) => p.split(",").map(Number));
+        expect(Math.max(...points.map(([x]) => x))).toBeGreaterThanOrEqual(1000 + 300);
+        await showMode(root, "Live");
+        expect(mapCount(root, ".trail circle")).toBe(0);
+        expect(mapCount(root, "g.target")).toBe(1);
+        expect(root.querySelector(".history-range")).toBeNull();
+      });
+    });
+  });
+
+  it("lays out the Edit section with one toggle per line, and the buttons in two rows", async () => {
+    const root = await renderCard({}, hass());
+    const rows = [...root.querySelectorAll("details.edit .snap-row")];
+    expect(rows.map((r) => [...r.querySelectorAll("label.check")].length)).toEqual([1, 1]);
+    expect(rows[0].textContent).toContain("Snap to grid");
+    expect(rows[0].textContent).toContain("Step");
+    expect(rows[1].textContent).toContain("Snap to nearby points");
+    const toolbars = [...root.querySelectorAll("details.edit .edit-toolbar")];
+    const labels = (toolbar: Element) => [...toolbar.querySelectorAll("button")].map((b) => b.textContent!.trim());
+    expect(toolbars.map(labels)).toEqual([
+      ["Undo", "Redo", "Delete point", "Clear", "Fit zone to targets"],
+      ["Revert", "Save"],
+    ]);
   });
 
   describe("radar position", () => {
@@ -745,15 +933,14 @@ describe("ld2450-zone-card", () => {
     });
   });
 
-  it("lays out targets, edit, grid and entities", async () => {
+  it("lays out edit, targets, radar position and entities", async () => {
     const root = await renderCard({}, hass());
-    const sections = [...root.querySelectorAll(".card-content > section, .card-content > details")].map((el) =>
-      el.tagName === "SECTION" ? el.className : el.querySelector("summary")!.textContent!.trim(),
+    const sections = [...root.querySelectorAll(".card-content > details")].map((el) =>
+      el.querySelector("summary")!.textContent!.trim(),
     );
-    expect(sections).toEqual(["targets", "Edit", "Radar Position", "Entities"]);
-    // The targets go straight under the map, without a heading
-    expect(root.querySelector(".targets h3")).toBeNull();
+    expect(sections).toEqual(["Edit", "Targets", "Radar Position", "Entities"]);
     expect((root.querySelector("details.edit") as HTMLDetailsElement).open).toBe(true);
+    expect((root.querySelector("details.targets-details") as HTMLDetailsElement).open).toBe(false);
     expect((root.querySelector("details.radar") as HTMLDetailsElement).open).toBe(false);
     const map = root.querySelector("ld2450-zone-map")! as unknown as HTMLElement & { updateComplete: Promise<unknown> };
     await map.updateComplete;
@@ -836,14 +1023,19 @@ describe("ld2450-zone-card", () => {
     it("opens Edit only by default", async () => {
       const root = await withSaved({});
       expect(open(root, "details.edit")).toBe(true);
+      expect(open(root, "details.targets-details")).toBe(false);
       expect(open(root, "details.radar")).toBe(false);
       expect([...root.querySelectorAll("details")].filter((d) => d.open)).toHaveLength(1);
     });
 
     it("restores the zone and the sections", async () => {
-      const root = await withSaved({ zoneId: "text.desk", sections: { edit: false, radar: true, entities: true } });
+      const root = await withSaved({
+        zoneId: "text.desk",
+        sections: { edit: false, targets: true, radar: true, entities: true },
+      });
       expect((root.querySelectorAll(".selectors select")[1] as HTMLSelectElement).value).toBe("text.desk");
       expect(open(root, "details.edit")).toBe(false);
+      expect(open(root, "details.targets-details")).toBe(true);
       expect(open(root, "details.radar")).toBe(true);
       expect([...root.querySelectorAll("details")].every((d) => d.open === (d.className !== "edit"))).toBe(true);
     });
@@ -922,6 +1114,66 @@ describe("ld2450-zone-card", () => {
       const offline = await renderCard({}, withButton("unavailable"));
       expect(presses()).toEqual([]);
       offline.host.remove();
+    });
+
+    describe("fast updates", () => {
+      const toggle = (root: ShadowRoot) => root.querySelector(".fast-updates input") as HTMLInputElement | null;
+
+      it("is shown, on, only when the device has a button", async () => {
+        const root = await renderCard({}, withButton());
+        expect(toggle(root)!.checked).toBe(true);
+        expect(root.querySelector(".fast-updates")!.textContent).toContain("Fast updates");
+        // It's the last line of the Targets section, and explains itself
+        expect(root.querySelector("details.targets-details")!.lastElementChild).toBe(
+          root.querySelector(".fast-updates"),
+        );
+        expect(root.querySelector(".fast-updates")!.getAttribute("title")).toContain("every position");
+        root.host.remove();
+        const without = await renderCard({}, hass());
+        expect(toggle(without)).toBeNull();
+        without.host.remove();
+        const offline = await renderCard({}, withButton("unavailable"));
+        expect(toggle(offline)).toBeNull();
+        offline.host.remove();
+      });
+
+      it("stops pressing the button when turned off, and saves the choice", async () => {
+        const root = await renderCard({}, withButton());
+        expect(presses()).toHaveLength(1);
+        calls.length = 0;
+        toggle(root)!.click();
+        await (root.host as Ld2450ZoneCard).updateComplete;
+        expect(calls).toContainEqual({
+          type: "frontend/set_user_data",
+          key: "ld2450_zone_card",
+          value: { fastUpdates: false },
+        });
+        expect(toggle(root)!.checked).toBe(false);
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+        try {
+          vi.advanceTimersByTime(PRESS_INTERVAL_MS * 3);
+          expect(presses()).toEqual([]);
+        } finally {
+          vi.useRealTimers();
+        }
+        root.host.remove();
+      });
+
+      it("starts off when it was saved off, and presses again when turned back on", async () => {
+        const h = withButton();
+        const callWS = h.callWS;
+        h.callWS = <T>(msg: { type: string; [key: string]: unknown }) =>
+          msg.type === "frontend/get_user_data"
+            ? Promise.resolve({ value: { fastUpdates: false } } as T)
+            : callWS<T>(msg);
+        const root = await renderCard({}, h);
+        expect(toggle(root)!.checked).toBe(false);
+        expect(presses()).toEqual([]);
+        toggle(root)!.click();
+        await (root.host as Ld2450ZoneCard).updateComplete;
+        expect(presses()).toHaveLength(1);
+        root.host.remove();
+      });
     });
 
     it("is pressed by the config's button", async () => {

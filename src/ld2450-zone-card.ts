@@ -3,6 +3,7 @@ import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
 import { insidePolygon, perimeter } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
+import { fetchTargetHistory, toLocalInput } from "./history";
 import { fetchEntityIdParts } from "./naming";
 import {
   FLOOR_PLAN_MAX_POINTS,
@@ -58,6 +59,11 @@ const SAVE_DELAY_MS = 500;
 /** The "Edit" choice for the floor plan, next to the zones. */
 const FLOOR_PLAN = "floor-plan";
 
+/** What the map shows of the targets. */
+type TargetsMode = "live" | "trail" | "history";
+
+const MODE_LABELS: Record<TargetsMode, string> = { live: "Live", trail: "Trail", history: "History" };
+
 /** What can be edited: a zone (saved to the device) or the device's floor plan (saved in HA). */
 type Target = { kind: "zone"; key: string; zone: Zone } | { kind: "floorPlan"; key: string; device: Ld2450Device };
 
@@ -66,6 +72,8 @@ const MAX_UNDO = 100;
 // Most target positions kept in the trail of each device. Each is an SVG circle, repainted whenever the map changes:
 // measured, 5k-10k keeps redraws around a frame or two on phones, while memory stays a few MB
 const MAX_TRAIL = 7000;
+// How far back the History view starts
+const HISTORY_DEFAULT_MS = 60 * 60 * 1000;
 
 /** Drafts before (undo) and after (redo) each change; undefined is "no draft", i.e. what's saved. */
 interface History {
@@ -135,7 +143,10 @@ export class Ld2450ZoneCard extends LitElement {
     _selectedVertex: { state: true },
     _pointText: { state: true },
     _history: { state: true },
-    _trailOn: { state: true },
+    _mode: { state: true },
+    _past: { state: true },
+    _historyStart: { state: true },
+    _historyEnd: { state: true },
     _marginText: { state: true },
   };
 
@@ -170,8 +181,19 @@ export class Ld2450ZoneCard extends LitElement {
   /** The device shown, and its zones. */
   private _currentDevice?: string;
   private _currentZones: Zone[] = [];
-  /** Whether the trail is on. Off on every load. */
-  private _trailOn = false;
+  /**
+   * What the map shows of the targets: where they are now, where they've been since the trail was turned on, or where
+   * Home Assistant recorded them in a period. Live on every load.
+   */
+  private _mode: TargetsMode = "live";
+  /** The recorded positions of the History view for a device, once loaded. */
+  private _past?: { device: string; points: Point[]; loading: boolean; truncated?: boolean; error?: string };
+  /** The period of the History view, as the datetime-local inputs have it. */
+  private _historyStart = "";
+  private _historyEnd = "";
+  private _historyRequest = 0;
+  /** The xy sensors of the shown device. */
+  private _currentSensors: string[] = [];
   /** The trail margin while the user is typing it. */
   private _marginText?: string;
   private _marginSaveTimer?: ReturnType<typeof setTimeout>;
@@ -183,6 +205,8 @@ export class Ld2450ZoneCard extends LitElement {
   private _unfilteredWanted?: string;
   private _unfilteredHeld?: { button: string; release: () => void };
   private _onScreen = true;
+  /** Fast updates are saved: don't press the button before knowing whether the user turned them off. */
+  private _userSettingsLoaded = false;
   private _intersection?: IntersectionObserver;
 
   /** The visual editor, built by Home Assistant from this form. */
@@ -227,7 +251,10 @@ export class Ld2450ZoneCard extends LitElement {
     }
     if (this.hass !== undefined && this._userSettings === undefined) {
       this._userSettings = {};
-      fetchUserSettings(this.hass).then((settings) => (this._userSettings = { ...settings, ...this._userSettings }));
+      fetchUserSettings(this.hass).then((settings) => {
+        this._userSettings = { ...settings, ...this._userSettings };
+        this._userSettingsLoaded = true;
+      });
     }
     if (this.hass !== undefined && this._unsubscribeSystem === undefined && this.isConnected) {
       this._unsubscribeSystem = subscribeSystemSettings(this.hass, (settings) => {
@@ -272,6 +299,16 @@ export class Ld2450ZoneCard extends LitElement {
 
   override updated(): void {
     this._syncUnfiltered();
+    // The History view loads when it's opened, its period changes, or another device is shown
+    if (this._mode === "history" && this._currentDevice !== undefined && this._past === undefined) {
+      this._loadHistory(this._currentDevice);
+    } else if (this._mode === "history" && this._past !== undefined && this._past.device !== this._currentDevice) {
+      this._loadHistory(this._currentDevice!);
+    }
+  }
+
+  private get _fastUpdates(): boolean {
+    return this._userSettings?.fastUpdates ?? true;
   }
 
   /** Have the device publish every target position while the card is visible and the button can be pressed. */
@@ -280,6 +317,8 @@ export class Ld2450ZoneCard extends LitElement {
     const state = button === undefined ? undefined : this.hass?.states[button]?.state;
     const wanted =
       button !== undefined &&
+      this._userSettingsLoaded &&
+      this._fastUpdates &&
       this.isConnected &&
       this._onScreen &&
       document.visibilityState !== "hidden" &&
@@ -379,7 +418,8 @@ export class Ld2450ZoneCard extends LitElement {
     const offline = this._isOffline(device);
     const floorPlanLabel = this._floorPlanDirty(device.id, floorPlan) ? "Floor plan (unsaved)" : "Floor plan";
     const targets = readTargets(this.hass!, device.targets);
-    if (this._trailOn) this._recordTrail(device.id, targets);
+    this._currentSensors = device.targets.map((t) => t.xy);
+    if (this._mode === "trail") this._recordTrail(device.id, targets);
     return html`
       <div class="selectors">
         <label>
@@ -423,9 +463,9 @@ export class Ld2450ZoneCard extends LitElement {
       <ld2450-zone-map
         .mount=${mount}
         .units=${this._units}
-        .targets=${targets}
-        .trail=${this._trails[device.id] ?? []}
-        ?trailShown=${this._trailOn}
+        .targets=${this._mode === "history" ? [] : targets}
+        .trail=${this._track(device.id)}
+        ?trailShown=${this._mode !== "live"}
         .floorPlan=${floorPlan}
         ?editingFloorPlan=${target?.kind === "floorPlan"}
         .overlays=${this._userSettings?.overlays ?? {}}
@@ -452,12 +492,15 @@ export class Ld2450ZoneCard extends LitElement {
         @overlay-toggled=${(ev: CustomEvent<{ overlay: Overlay; shown: boolean }>) =>
           this._toggleOverlay(ev.detail.overlay, ev.detail.shown)}
       ></ld2450-zone-map>
-      ${this._renderTargetPositions(targets, mount, offline)}
       ${
         target === undefined || editing === undefined
           ? nothing
-          : this._renderEditor(target, mount, editing, offline, this._trails[device.id] ?? [])
+          : this._renderEditor(target, mount, editing, offline, this._fitPoints(device.id, targets))
       }
+      <details class="targets-details" ?open=${this._sectionOpen("targets")} @toggle=${this._sectionToggled("targets")}>
+        <summary>Targets</summary>
+        ${this._renderTargetsView(device, targets, mount, offline)} ${this._renderFastUpdates(device)}
+      </details>
       <details class="radar" ?open=${this._sectionOpen("radar")} @toggle=${this._sectionToggled("radar")}>
         <summary>Radar Position</summary>
         <p class="help">
@@ -483,6 +526,28 @@ export class Ld2450ZoneCard extends LitElement {
         <summary>Entities</summary>
         ${target?.kind === "zone" ? this._renderZone(target.zone) : nothing} ${this._renderTargets(device)}
       </details>
+    `;
+  }
+
+  /** The switch for pressing the device's xy unfiltered button, when it has one that can be pressed. */
+  private _renderFastUpdates(device: Ld2450Device) {
+    const state =
+      device.xyUnfilteredButton === undefined ? undefined : this.hass?.states[device.xyUnfilteredButton]?.state;
+    if (state === undefined || state === "unavailable") return nothing;
+    const help =
+      "Fast updates: while this card is visible, the radar sends every position it sees (up to 10 a second) " +
+      "instead of one a second, for a smoother map and a more detailed trail. It uses more of Home Assistant's " +
+      "resources, and stops by itself when no card is open.";
+    return html`
+      <label class="check fast-updates" title=${help}>
+        <input
+          type="checkbox"
+          title=${help}
+          .checked=${this._fastUpdates}
+          @change=${(ev: Event) => this._setUserSetting({ fastUpdates: (ev.target as HTMLInputElement).checked })}
+        />
+        Fast updates
+      </label>
     `;
   }
 
@@ -562,7 +627,7 @@ export class Ld2450ZoneCard extends LitElement {
     };
   }
 
-  private _renderEditor(target: Target, mount: Mount, editing: Editing, offline: boolean, trail: Point[]) {
+  private _renderEditor(target: Target, mount: Mount, editing: Editing, offline: boolean, fitPoints: Point[]) {
     const { points, check } = editing;
     const isZone = target.kind === "zone";
     const maxPoints = isZone ? POLYGON_MAX_POINTS : FLOOR_PLAN_MAX_POINTS;
@@ -625,6 +690,8 @@ export class Ld2450ZoneCard extends LitElement {
                 </label>`
               : nothing
           }
+        </div>
+        <div class="snap-row">
           <label class="check snap-points">
             <input
               type="checkbox"
@@ -634,7 +701,7 @@ export class Ld2450ZoneCard extends LitElement {
             Snap to nearby points
           </label>
         </div>
-        ${this._renderTrail(target, mount, trail)} ${this._renderSelectedPoint(target, editing)}
+        ${this._renderMargin(target)} ${this._renderSelectedPoint(target, editing)}
         <div class="edit-toolbar">
           <button
             title="Undo (Ctrl+Z)"
@@ -657,6 +724,20 @@ export class Ld2450ZoneCard extends LitElement {
             Delete point
           </button>
           <button ?disabled=${points.length === 0} @click=${() => this._setDraft(target, [])}>Clear</button>
+          ${
+            isZone
+              ? html`<button
+                  class="fit"
+                  title="Replace the zone with an area around the targets shown on the map, keeping the margin to each"
+                  ?disabled=${fitPoints.length === 0}
+                  @click=${() => this._fitToTargets(target, mount, fitPoints)}
+                >
+                  Fit zone to targets
+                </button>`
+              : nothing
+          }
+        </div>
+        <div class="edit-toolbar commit">
           <button ?disabled=${!editing.dirty || saving} @click=${() => this._revert(target)}>Revert</button>
           <span class="spacer"></span>
           <button class="save" ?disabled=${!canSave} @click=${() => this._save(target, mount, editing)}>
@@ -721,59 +802,97 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
-  private _renderTrail(target: Target, mount: Mount, trail: Point[]) {
-    const isZone = target.kind === "zone";
+  /** The margin "Fit zone to targets" keeps to every target, for zones. */
+  private _renderMargin(target: Target) {
+    if (target.kind !== "zone") return nothing;
     return html`
-      <div class="trail">
-        <label class="check">
+      <div class="margin-row">
+        <label class="inline margin" title="The margin Fit zone to targets keeps to each target">
+          Fit margin (${inputUnit(this._units)})
           <input
-            type="checkbox"
-            .checked=${this._trailOn}
-            @change=${(ev: Event) => this._toggleTrail((ev.target as HTMLInputElement).checked)}
+            type="number"
+            min="0"
+            max=${toInputValue(MAX_TRAIL_MARGIN, this._units)}
+            step=${this._units === "metric" ? 0.05 : 0.25}
+            .value=${this._marginText ?? String(toInputValue(this._trailMargin, this._units))}
+            @input=${this._marginInput}
+            @change=${() => (this._marginText = undefined)}
           />
-          Trail
         </label>
-        ${
-          !this._trailOn
-            ? nothing
-            : html`
-                ${
-                  isZone
-                    ? html`<label class="inline margin">
-                        Margin (${inputUnit(this._units)})
-                        <input
-                          type="number"
-                          min="0"
-                          max=${toInputValue(MAX_TRAIL_MARGIN, this._units)}
-                          step=${this._units === "metric" ? 0.05 : 0.25}
-                          .value=${this._marginText ?? String(toInputValue(this._trailMargin, this._units))}
-                          @input=${this._marginInput}
-                          @change=${() => (this._marginText = undefined)}
-                        />
-                      </label>`
-                    : nothing
-                }
-                <button
-                  class="clear"
-                  ?disabled=${trail.length === 0}
-                  @click=${() => this._currentDevice && this._clearTrail(this._currentDevice)}
-                >
+      </div>
+    `;
+  }
+
+  /** The Targets section: pick what the map shows of the targets, with what goes with it. */
+  private _renderTargetsView(device: Ld2450Device, targets: TargetPosition[], mount: Mount, offline: boolean) {
+    const track = this._track(device.id);
+    return html`
+      <div class="segmented target-modes" role="group" aria-label="Targets view">
+        ${(["live", "trail", "history"] as const).map(
+          (mode) =>
+            html`<button aria-pressed=${String(this._mode === mode)} @click=${() => this._setMode(mode)}>
+              ${MODE_LABELS[mode]}
+            </button>`,
+        )}
+      </div>
+      ${
+        this._mode === "live"
+          ? this._renderTargetPositions(targets, mount, offline)
+          : this._mode === "trail"
+            ? html`<div class="track-actions">
+                <p class="help">Where the targets are seen while this view is open.</p>
+                <button class="clear" ?disabled=${track.length === 0} @click=${() => this._clearTrail(device.id)}>
                   Clear
                 </button>
-                ${
-                  isZone
-                    ? html`<button
-                        class="fit"
-                        ?disabled=${trail.length === 0}
-                        @click=${() => this._fitToTrail(target, mount, trail)}
-                      >
-                        Fit zone to trail
-                      </button>`
-                    : nothing
-                }
-              `
-        }
+              </div>`
+            : this._renderHistory()
+      }
+    `;
+  }
+
+  private _renderHistory() {
+    const past = this._past;
+    return html`
+      <div class="history-range">
+        <label class="inline">
+          From
+          <input
+            type="datetime-local"
+            .value=${this._historyStart}
+            max=${this._historyEnd}
+            @change=${(ev: Event) => this._historyChanged("start", (ev.target as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="inline">
+          To
+          <input
+            type="datetime-local"
+            .value=${this._historyEnd}
+            min=${this._historyStart}
+            @change=${(ev: Event) => this._historyChanged("end", (ev.target as HTMLInputElement).value)}
+          />
+        </label>
       </div>
+      ${
+        past === undefined || past.loading
+          ? html`<p class="help">Loading…</p>`
+          : past.error !== undefined
+            ? html`<p class="error">${past.error}</p>`
+            : past.points.length === 0
+              ? html`<p class="help">No positions recorded in this period.</p>`
+              : html`<p class="help">
+                    ${past.points.length} position${past.points.length === 1 ? "" : "s"}, as Home Assistant recorded
+                    them.
+                  </p>
+                  ${
+                    past.truncated
+                      ? html`<p class="warn">
+                          Only the most recent ${MAX_TRAIL.toLocaleString("en-US")} positions of this period are shown.
+                          Pick a shorter period to see the rest.
+                        </p>`
+                      : nothing
+                  }`
+      }
     `;
   }
 
@@ -912,10 +1031,63 @@ export class Ld2450ZoneCard extends LitElement {
     this.requestUpdate();
   }
 
-  private _toggleTrail(shown: boolean): void {
-    this._trailOn = shown;
+  /** The points the map shows besides the live targets: the trail, or the history. */
+  private _track(deviceId: string): Point[] {
+    if (this._mode === "trail") return this._trails[deviceId] ?? [];
+    if (this._mode === "history") return this._past?.points ?? [];
+    return [];
+  }
+
+  /** The points to fit a zone to: the targets on the map, whichever view shows them. */
+  private _fitPoints(deviceId: string, targets: TargetPosition[]): Point[] {
+    return this._mode === "live" ? targets.map((t) => t.point) : this._track(deviceId);
+  }
+
+  private _setMode(mode: TargetsMode): void {
+    if (mode === this._mode) return;
     // The trail starts afresh each time it's turned on
-    if (!shown) this._clearTrail();
+    if (this._mode === "trail") this._clearTrail();
+    this._mode = mode;
+    if (mode === "history" && this._historyStart === "") {
+      const now = new Date();
+      this._historyEnd = toLocalInput(now);
+      this._historyStart = toLocalInput(new Date(now.getTime() - HISTORY_DEFAULT_MS));
+    }
+    // Loaded when the card updates
+    this._past = undefined;
+  }
+
+  private _historyChanged(edge: "start" | "end", value: string): void {
+    if (edge === "start") this._historyStart = value;
+    else this._historyEnd = value;
+    this._past = undefined;
+  }
+
+  /** Load the positions of the History view's period for the shown device. */
+  private _loadHistory(deviceId: string): void {
+    const request = ++this._historyRequest;
+    const start = new Date(this._historyStart);
+    const end = new Date(this._historyEnd);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+      this._past = { device: deviceId, points: [], loading: false, error: "Pick a start that is before the end." };
+      return;
+    }
+    this._past = { device: deviceId, points: [], loading: true };
+    fetchTargetHistory(this.hass!, this._currentSensors, start, end, MAX_TRAIL).then(
+      ({ points, truncated }) => {
+        if (request === this._historyRequest) this._past = { device: deviceId, points, loading: false, truncated };
+      },
+      (err) => {
+        if (request !== this._historyRequest) return;
+        const reason = err instanceof Error ? err.message : (err?.message ?? String(err));
+        this._past = {
+          device: deviceId,
+          points: [],
+          loading: false,
+          error: `Home Assistant couldn't give the history: ${reason}`,
+        };
+      },
+    );
   }
 
   private get _trailMargin(): number {
@@ -938,14 +1110,14 @@ export class Ld2450ZoneCard extends LitElement {
   }
 
   /**
-   * Replace the zone with a perimeter around the trail, keeping the margin to every point. It's built in room
+   * Replace the zone with a perimeter around the targets on the map, keeping the margin to every point. It's built in room
    * coordinates, so its edges line up with the map.
    */
-  private _fitToTrail(target: Target, mount: Mount, trail: Point[]): void {
+  private _fitToTargets(target: Target, mount: Mount, points: Point[]): void {
     this._setDraft(
       target,
       perimeter(
-        trail.map((p) => toRoom(p, mount)),
+        points.map((p) => toRoom(p, mount)),
         this._trailMargin,
       ),
     );
@@ -1162,8 +1334,8 @@ export class Ld2450ZoneCard extends LitElement {
     }
     .targets ul {
       display: flex;
-      flex-wrap: wrap;
-      gap: 4px 16px;
+      flex-direction: column;
+      gap: 4px;
       margin: 0;
       padding: 0;
       list-style: none;
@@ -1182,11 +1354,12 @@ export class Ld2450ZoneCard extends LitElement {
       color: var(--secondary-text-color);
     }
     details.edit > summary,
+    details.targets-details > summary,
     details.radar > summary {
       margin-bottom: 8px;
     }
     .point,
-    .trail {
+    .margin-row {
       display: flex;
       flex-wrap: wrap;
       align-items: center;
@@ -1212,9 +1385,9 @@ export class Ld2450ZoneCard extends LitElement {
       align-items: center;
       gap: 8px 16px;
       min-height: 2em;
-      margin-bottom: 12px;
+      margin-bottom: 4px;
     }
-    .trail button {
+    .track-actions button {
       padding: 6px 12px;
       font: inherit;
       font-size: 0.9em;
@@ -1224,13 +1397,14 @@ export class Ld2450ZoneCard extends LitElement {
       border-radius: 4px;
       cursor: pointer;
     }
-    .trail button:disabled {
+    .track-actions button:disabled {
       color: var(--disabled-text-color, #bdbdbd);
       cursor: default;
     }
     .point input,
     .snap-row input[type="number"],
-    .trail input[type="number"] {
+    .margin-row input[type="number"],
+    .history-range input {
       padding: 4px 8px;
       font: inherit;
       color: var(--primary-text-color);
@@ -1352,6 +1526,7 @@ export class Ld2450ZoneCard extends LitElement {
       flex-wrap: wrap;
       align-items: center;
       gap: 8px;
+      margin-bottom: 8px;
     }
     .spacer {
       flex: 1;
@@ -1369,6 +1544,34 @@ export class Ld2450ZoneCard extends LitElement {
     .edit-toolbar button:disabled {
       color: var(--disabled-text-color, #bdbdbd);
       cursor: default;
+    }
+    .fast-updates {
+      margin-top: 8px;
+    }
+    .target-modes {
+      margin-bottom: 8px;
+    }
+    .track-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+    }
+    .track-actions .help {
+      margin: 0;
+    }
+    .warn {
+      margin: 4px 0 0;
+      color: var(--warning-color);
+    }
+    .history-range {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      margin-bottom: 4px;
+    }
+    .history-range label.inline input {
+      width: auto;
     }
     label.check {
       display: flex;

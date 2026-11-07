@@ -19,6 +19,8 @@ export interface UserSettings {
   trailMargin?: Partial<Record<Units, number>>;
   /** Snap step for each unit system, in mm. */
   snapStep?: Partial<Record<Units, number>>;
+  /** Ask the device for every target position while the card is visible. On until turned off. */
+  fastUpdates?: boolean;
   /** The device and the zone (or floor plan) last selected. */
   deviceId?: string;
   zoneId?: string;
@@ -26,9 +28,9 @@ export interface UserSettings {
   sections?: Partial<Record<Section, boolean>>;
 }
 
-export type Section = "edit" | "radar" | "entities";
+export type Section = "edit" | "targets" | "radar" | "entities";
 
-export const DEFAULT_SECTIONS: Record<Section, boolean> = { edit: true, radar: false, entities: false };
+export const DEFAULT_SECTIONS: Record<Section, boolean> = { edit: true, targets: false, radar: false, entities: false };
 
 export async function fetchUserSettings(hass: HomeAssistant): Promise<UserSettings> {
   try {
