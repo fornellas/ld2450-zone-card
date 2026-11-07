@@ -126,6 +126,31 @@ describe("ld2450-zone-map fitting targets and trail", () => {
   }
   const far = { x: 4000, y: 6000 };
 
+  it("draws live targets, the trail and the history at the same size on screen, however the map is fitted", async () => {
+    const sizes: number[] = [];
+    for (const point of [
+      { x: 100, y: 1200 },
+      { x: 300, y: 9000 },
+      { x: 9000, y: 1200 },
+    ]) {
+      const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+      map.overlays = { trackingRange: false, floorPlan: false };
+      map.targets = [{ label: "1", name: "Target 1", point }];
+      map.trail = [point];
+      map.trailShown = true;
+      // As if it were 400 pixels wide
+      (map as unknown as { _widthPx: number })._widthPx = 400;
+      document.body.appendChild(map);
+      await map.updateComplete;
+      const viewWidth = Number(map.shadowRoot!.querySelector("svg")!.getAttribute("viewBox")!.split(" ")[2]);
+      for (const selector of ["g.target circle", ".trail circle"]) {
+        const radius = Number(map.shadowRoot!.querySelector(selector)!.getAttribute("r"));
+        sizes.push(Math.round(((radius * 400) / viewWidth) * 100) / 100);
+      }
+    }
+    expect(new Set(sizes)).toEqual(new Set([8]));
+  });
+
   it("zooms out to keep targets in view", async () => {
     const without = await width(() => undefined);
     const withTarget = await width((map) => (map.targets = [{ label: "1", name: "Target 1", point: far }]));

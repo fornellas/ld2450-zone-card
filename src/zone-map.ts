@@ -33,6 +33,11 @@ const MIN_MAP_SIZE = 2000;
 const TARGET_PADDING = 300;
 // Pointer movement, in screen pixels, before pressing a point becomes dragging it
 const DRAG_THRESHOLD_PX = 4;
+// Radius of a target marker, in screen pixels: the same for live targets, the trail and the history, however much
+// the map is zoomed to fit them
+const TARGET_RADIUS_PX = 8;
+// The number inside a target marker, relative to the marker's radius
+const TARGET_LABEL_RATIO = 0.9 / 0.7;
 // Smallest radius around a point that grabs it, in screen pixels, so fingers can hit it
 const MIN_HIT_RADIUS_PX = 22;
 
@@ -136,6 +141,8 @@ export class Ld2450ZoneMap extends LitElement {
   private _handle = 100;
   /** Radius around a point that grabs it, in room mm. */
   private _hitRadius = 100;
+  /** Radius of a target marker, in room mm. */
+  private _targetRadius = 100;
   /** Rendered width of the map, in screen pixels, to size things in pixels. */
   private _widthPx = 0;
   private _resizeObserver?: ResizeObserver;
@@ -189,6 +196,8 @@ export class Ld2450ZoneMap extends LitElement {
     const viewBox = `${view.minX} ${-view.maxY} ${view.maxX - view.minX} ${view.maxY - view.minY}`;
     const mmPerPx = this._widthPx > 0 ? (view.maxX - view.minX) / this._widthPx : 0;
     this._hitRadius = Math.max(this._handle, MIN_HIT_RADIUS_PX * mmPerPx);
+    // Before the map's width is known, as many pixels as there would be at a typical width
+    this._targetRadius = mmPerPx > 0 ? TARGET_RADIUS_PX * mmPerPx : font * 0.7;
     // Everything shown but the polygon being edited
     this._snapPoints = [
       ...(this.editingFloorPlan ? [] : floorPlan),
@@ -215,7 +224,7 @@ export class Ld2450ZoneMap extends LitElement {
         ${this._shown("trackingRange") ? svg`<polygon class="area" points=${pointsAttr(area)}></polygon>` : nothing}
         ${this._renderZones(font)} ${this._editorShown ? this._renderEditor(font) : nothing} ${this._renderRadar()}
         <!-- The trail and targets go last, so nothing tints them. They let clicks through to the point handles. -->
-        ${this._renderTrail(font)} ${this._shown("targets") ? this._renderTargets(font) : nothing}
+        ${this._renderTrail()} ${this._shown("targets") ? this._renderTargets() : nothing}
       </svg>
       <div class="legend">
         ${this._renderToggle("trackingRange", "area", "Tracking range")}
@@ -277,14 +286,9 @@ export class Ld2450ZoneMap extends LitElement {
     `;
   }
 
-  /** Targets are drawn just big enough for their number. */
-  private _targetRadius(font: number): number {
-    return font * 0.7;
-  }
-
-  private _renderTrail(font: number) {
+  private _renderTrail() {
     if (!this.trailShown) return nothing;
-    const r = this._targetRadius(font);
+    const r = this._targetRadius;
     return svg`
       <g class="trail">
         ${this.trail.map((point) => {
@@ -295,14 +299,14 @@ export class Ld2450ZoneMap extends LitElement {
     `;
   }
 
-  private _renderTargets(font: number) {
+  private _renderTargets() {
     return this.targets.map((t) => {
       const p = toRoom(t.point, this.mount);
       return svg`
         <g class="target">
           <title>${t.name}: x ${formatLength(p.x, this.units)}, y ${formatLength(p.y, this.units)}</title>
-          <circle cx=${p.x} cy=${-p.y} r=${this._targetRadius(font)}></circle>
-          <text x=${p.x} y=${-p.y} style="font-size: ${font * 0.9}px" text-anchor="middle" dominant-baseline="central">
+          <circle cx=${p.x} cy=${-p.y} r=${this._targetRadius}></circle>
+          <text x=${p.x} y=${-p.y} style="font-size: ${this._targetRadius * TARGET_LABEL_RATIO}px" text-anchor="middle" dominant-baseline="central">
             ${t.label}
           </text>
         </g>
