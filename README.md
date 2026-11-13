@@ -22,7 +22,7 @@ evaluated on the device.
   drawing is kept to fix and save again.
 - **Live targets,** and with the optional `xy_unfiltered` button (see
   [ESPHome configuration](#esphome-configuration)), **Fast updates:** every position the radar reports, instead of
-  one a second, while the card is visible.
+  one a second, while the card shows live targets or the trail.
 - **Trail and History:** see where people actually walk, sit or stand, from the positions seen since you opened
   the Trail view (which you can pause), or from what Home Assistant recorded in a period (the last 7,000 positions;
   History needs the recorder). Positions are colored by age, from dark purple for the oldest to yellow for the
