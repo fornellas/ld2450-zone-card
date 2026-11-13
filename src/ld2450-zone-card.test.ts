@@ -1202,6 +1202,42 @@ describe("ld2450-zone-card", () => {
         offline.host.remove();
       });
 
+      it("is hidden in the History view, which doesn't use it, and the button isn't pressed there", async () => {
+        vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+        try {
+          const h = withButton();
+          const callWS = h.callWS;
+          h.callWS = <T>(msg: { type: string; [key: string]: unknown }) =>
+            msg.type === "history/history_during_period" ? Promise.resolve({} as T) : callWS<T>(msg);
+          const root = await renderCard({}, h);
+          const card = root.host as Ld2450ZoneCard;
+          const showMode = async (mode: string) => {
+            [...root.querySelectorAll<HTMLButtonElement>(".target-modes button")]
+              .find((b) => b.textContent!.includes(mode))!
+              .click();
+            await card.updateComplete;
+            await new Promise((resolve) => setTimeout(resolve));
+            await card.updateComplete;
+          };
+          vi.advanceTimersByTime(PRESS_INTERVAL_MS);
+          expect(presses()).toHaveLength(2);
+          // It shows for Live and Trail
+          await showMode("Trail");
+          expect(toggle(root)).not.toBeNull();
+          await showMode("History");
+          expect(toggle(root)).toBeNull();
+          vi.advanceTimersByTime(PRESS_INTERVAL_MS * 3);
+          expect(presses()).toHaveLength(2);
+          // Back from History, it's pressed again at once
+          await showMode("Live");
+          expect(toggle(root)!.checked).toBe(true);
+          expect(presses()).toHaveLength(3);
+          root.host.remove();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+
       it("stops pressing the button when turned off, and saves the choice", async () => {
         const root = await renderCard({}, withButton());
         expect(presses()).toHaveLength(1);

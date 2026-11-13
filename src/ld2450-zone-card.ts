@@ -323,6 +323,8 @@ export class Ld2450ZoneCard extends LitElement {
       button !== undefined &&
       this._userSettingsLoaded &&
       this._fastUpdates &&
+      // The History view shows recorded positions, not the live ones the button speeds up
+      this._mode !== "history" &&
       this.isConnected &&
       this._onScreen &&
       document.visibilityState !== "hidden" &&
@@ -535,6 +537,7 @@ export class Ld2450ZoneCard extends LitElement {
 
   /** The switch for pressing the device's xy unfiltered button, when it has one that can be pressed. */
   private _renderFastUpdates(device: Ld2450Device) {
+    if (this._mode === "history") return nothing;
     const state =
       device.xyUnfilteredButton === undefined ? undefined : this.hass?.states[device.xyUnfilteredButton]?.state;
     if (state === undefined || state === "unavailable") return nothing;
