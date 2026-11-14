@@ -189,10 +189,13 @@ describe("ld2450-zone-map fitting targets and trail", () => {
       expect(classes()).toEqual(["", "", "", ""]);
       map.highlight = { from: 1500, to: 2000 };
       await map.updateComplete;
-      expect(classes()).toEqual(["dim", "dim", "hot", "hot"]);
+      // The ones that stand out are drawn last, in time order, each with a contrasting outline under all of them
+      expect(classes()).toEqual(["dim", "dim", "halo", "halo", "hot", "hot"]);
       const circles = [...map.shadowRoot!.querySelectorAll(".trail circle")];
-      // The ones that stand out are drawn last, in time order
-      expect(circles.map((c) => c.getAttribute("cx"))).toEqual(["0", "3000", "0", "2000"]);
+      expect(circles.map((c) => c.getAttribute("cx"))).toEqual(["0", "3000", "0", "2000", "0", "2000"]);
+      // The outlines have no color of their own, to follow the theme
+      expect(circles[2].hasAttribute("stroke")).toBe(false);
+      expect(circles[4].hasAttribute("stroke")).toBe(true);
     });
 
     it("tells the time of the position under the pointer, and when it's over none", async () => {

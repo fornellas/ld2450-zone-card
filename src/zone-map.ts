@@ -308,10 +308,17 @@ export class Ld2450ZoneMap extends LitElement {
       const p = toRoom(point, this.mount);
       return svg`<circle class=${state} cx=${p.x} cy=${-p.y} r=${r} stroke=${ageColor(ageFraction(point.time, range!))}></circle>`;
     };
-    // Oldest first, so the newest positions are drawn over the older ones. What stands out goes over the rest.
+    // A contrasting outline under what stands out, so it shows over any color beneath, such as the zone's fill
+    const halo = (point: TrackPoint) => {
+      const p = toRoom(point, this.mount);
+      return svg`<circle class="halo" cx=${p.x} cy=${-p.y} r=${r}></circle>`;
+    };
+    // Oldest first, so the newest positions are drawn over the older ones. What stands out goes over the rest, and
+    // its outlines go under all of it, so they don't cross the colored rings of its neighbors.
     return svg`
       <g class="trail">
         ${this.trail.map((point) => (highlight === undefined ? circle(point, "") : hot(point) ? nothing : circle(point, "dim")))}
+        ${highlight === undefined ? nothing : this.trail.map((point) => (hot(point) ? halo(point) : nothing))}
         ${highlight === undefined ? nothing : this.trail.map((point) => (hot(point) ? circle(point, "hot") : nothing))}
       </g>
     `;
@@ -709,6 +716,11 @@ export class Ld2450ZoneMap extends LitElement {
     }
     .trail circle.dim {
       stroke-opacity: 0.15;
+    }
+    .trail circle.halo {
+      stroke: var(--primary-text-color, #fff);
+      stroke-width: 5;
+      stroke-opacity: 0.9;
     }
     .trail circle.hot {
       stroke-width: 3;

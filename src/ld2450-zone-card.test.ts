@@ -844,7 +844,7 @@ describe("ld2450-zone-card", () => {
           expect(readout()).toContain("1 position around it");
           expect(root.querySelector(".age-track .tick")).not.toBeNull();
           const circles = [...root.querySelector("ld2450-zone-map")!.shadowRoot!.querySelectorAll(".trail circle")];
-          expect(circles.map((c) => c.getAttribute("class")).sort()).toEqual(["dim", "dim", "hot"]);
+          expect(circles.map((c) => c.getAttribute("class")).sort()).toEqual(["dim", "dim", "halo", "hot"]);
           track_leave(root);
           await settled();
           expect(map().highlight).toBeUndefined();
