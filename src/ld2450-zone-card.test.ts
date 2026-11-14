@@ -814,6 +814,84 @@ describe("ld2450-zone-card", () => {
         root.host.remove();
       });
 
+      describe("picking times on the color bar", () => {
+        async function inHistory() {
+          const root = await renderCard({}, withHistory(recorded));
+          await showMode(root, "History");
+          const track = root.querySelector<HTMLElement>(".age-track")!;
+          track.getBoundingClientRect = () => ({ left: 0, width: 100 }) as DOMRect;
+          const pointer = (type: string, x: number) =>
+            track.dispatchEvent(new MouseEvent(type, { clientX: x, bubbles: true }));
+          const settled = async () => {
+            await (root.host as Ld2450ZoneCard).updateComplete;
+            await (root.querySelector("ld2450-zone-map") as unknown as { updateComplete: Promise<unknown> })
+              .updateComplete;
+          };
+          const map = () =>
+            root.querySelector("ld2450-zone-map") as unknown as { highlight?: { from: number; to: number } };
+          const readout = () => root.querySelector(".age-readout")!.textContent!;
+          return { root, track, pointer, settled, map, readout };
+        }
+
+        it("shows the positions around the time under the pointer, and the time", async () => {
+          const { root, pointer, settled, map, readout } = await inHistory();
+          expect(readout()).toContain("Hover or drag");
+          // Positions at 2 s, 3 s and 4 s: halfway is 3 s
+          pointer("pointermove", 50);
+          await settled();
+          expect(map().highlight!.from).toBeLessThanOrEqual(3000);
+          expect(map().highlight!.to).toBeGreaterThanOrEqual(3000);
+          expect(readout()).toContain("1 position around it");
+          expect(root.querySelector(".age-track .tick")).not.toBeNull();
+          const circles = [...root.querySelector("ld2450-zone-map")!.shadowRoot!.querySelectorAll(".trail circle")];
+          expect(circles.map((c) => c.getAttribute("class")).sort()).toEqual(["dim", "dim", "hot"]);
+          track_leave(root);
+          await settled();
+          expect(map().highlight).toBeUndefined();
+          expect(root.querySelector(".age-track .tick")).toBeNull();
+          root.host.remove();
+        });
+
+        it("picks a period by dragging, keeps it, and clears it with a click", async () => {
+          const { root, pointer, settled, map, readout } = await inHistory();
+          pointer("pointerdown", 0);
+          pointer("pointermove", 60);
+          pointer("pointerup", 60);
+          await settled();
+          expect(root.querySelector(".age-track .band")).not.toBeNull();
+          expect(readout()).toContain("–");
+          expect(readout()).toContain("2 positions");
+          expect(map().highlight).toEqual({ from: expect.any(Number), to: expect.any(Number) });
+          pointer("pointerdown", 80);
+          pointer("pointerup", 80);
+          await settled();
+          expect(root.querySelector(".age-track .band")).toBeNull();
+          expect(map().highlight).toBeUndefined();
+          root.host.remove();
+        });
+
+        it("shows the time of the position under the pointer on the map, on the bar", async () => {
+          const { root, settled, map, readout } = await inHistory();
+          root
+            .querySelector("ld2450-zone-map")!
+            .dispatchEvent(new CustomEvent("trail-hover", { detail: { time: 3000 } }));
+          await settled();
+          expect(map().highlight).toEqual({ from: 3000, to: 3000 });
+          expect(root.querySelector(".age-track .tick")).not.toBeNull();
+          expect(readout()).not.toContain("Hover or drag");
+          root
+            .querySelector("ld2450-zone-map")!
+            .dispatchEvent(new CustomEvent("trail-hover", { detail: { time: undefined } }));
+          await settled();
+          expect(map().highlight).toBeUndefined();
+          root.host.remove();
+        });
+
+        function track_leave(root: ShadowRoot) {
+          root.querySelector(".age-track")!.dispatchEvent(new MouseEvent("pointerleave"));
+        }
+      });
+
       it("loads again when the period changes", async () => {
         const root = await renderCard({}, withHistory(recorded));
         await showMode(root, "History");

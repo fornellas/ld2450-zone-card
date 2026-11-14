@@ -39,6 +39,8 @@ const DRAG_THRESHOLD_PX = 4;
 const TARGET_RADIUS_PX = 8;
 // The number inside a target marker, relative to the marker's radius
 const TARGET_LABEL_RATIO = 0.9 / 0.7;
+// How many marker radii around a trail position the pointer can be, to tell its time
+const HOVER_REACH = 1.5;
 // Smallest radius around a point that grabs it, in screen pixels, so fingers can hit it
 const MIN_HIT_RADIUS_PX = 22;
 
@@ -100,6 +102,7 @@ export class Ld2450ZoneMap extends LitElement {
     overlays: { attribute: false },
     trail: { attribute: false },
     trailShown: { type: Boolean },
+    highlight: { attribute: false },
     editable: { type: Boolean },
     draft: { attribute: false },
     deviceOutline: { attribute: false },
@@ -124,6 +127,8 @@ export class Ld2450ZoneMap extends LitElement {
   trail: TrackPoint[] = [];
   /** Show the trail. */
   trailShown = false;
+  /** Times of the trail to stand out, and the rest of it dimmed. Fires "trail-hover" with the time of the position under the pointer. */
+  highlight?: { from: number; to: number };
   editable = false;
   /** The selected zone's points being edited, in room coordinates. */
   draft: Point[] = [];
@@ -145,6 +150,8 @@ export class Ld2450ZoneMap extends LitElement {
   private _hitRadius = 100;
   /** Radius of a target marker, in room mm. */
   private _targetRadius = 100;
+  /** The time of the trail position the pointer is over, to fire "trail-hover" only on changes. */
+  private _hoverTime?: number;
   /** Rendered width of the map, in screen pixels, to size things in pixels. */
   private _widthPx = 0;
   private _resizeObserver?: ResizeObserver;
@@ -214,6 +221,8 @@ export class Ld2450ZoneMap extends LitElement {
         style="--font: ${font}px"
         class=${this._editorShown ? "editable" : ""}
         tabindex=${this._editorShown ? "0" : "-1"}
+        @pointermove=${this._trailMove}
+        @pointerleave=${this._trailLeave}
         @click=${this._backgroundClick}
         @keydown=${this._keydown}
       >
@@ -292,15 +301,48 @@ export class Ld2450ZoneMap extends LitElement {
     if (!this.trailShown) return nothing;
     const r = this._targetRadius;
     const range = timeRange(this.trail);
+    const highlight = this.highlight;
+    const hot = (point: TrackPoint) =>
+      highlight !== undefined && point.time >= highlight.from && point.time <= highlight.to;
+    const circle = (point: TrackPoint, state: string) => {
+      const p = toRoom(point, this.mount);
+      return svg`<circle class=${state} cx=${p.x} cy=${-p.y} r=${r} stroke=${ageColor(ageFraction(point.time, range!))}></circle>`;
+    };
+    // Oldest first, so the newest positions are drawn over the older ones. What stands out goes over the rest.
     return svg`
       <g class="trail">
-        ${this.trail.map((point) => {
-          const p = toRoom(point, this.mount);
-          // Oldest first, so the newest positions are drawn over the older ones
-          return svg`<circle cx=${p.x} cy=${-p.y} r=${r} stroke=${ageColor(ageFraction(point.time, range!))}></circle>`;
-        })}
+        ${this.trail.map((point) => (highlight === undefined ? circle(point, "") : hot(point) ? nothing : circle(point, "dim")))}
+        ${highlight === undefined ? nothing : this.trail.map((point) => (hot(point) ? circle(point, "hot") : nothing))}
       </g>
     `;
+  }
+
+  /** Tell what time the trail position under the pointer was seen, if any. */
+  private _trailMove(ev: PointerEvent): void {
+    if (!this.trailShown || this.trail.length === 0 || this._drag !== undefined || ev.pointerType === "touch") return;
+    const room = this._roomPoint(ev);
+    if (room === undefined) return;
+    let time: number | undefined;
+    let nearest = this._targetRadius * HOVER_REACH;
+    for (const point of this.trail) {
+      const d = distance(toRoom(point, this.mount), room);
+      // The newest wins a tie
+      if (d <= nearest) {
+        nearest = d;
+        time = point.time;
+      }
+    }
+    this._setHoverTime(time);
+  }
+
+  private _trailLeave(): void {
+    this._setHoverTime(undefined);
+  }
+
+  private _setHoverTime(time: number | undefined): void {
+    if (time === this._hoverTime) return;
+    this._hoverTime = time;
+    this._emit("trail-hover", { time });
   }
 
   private _renderTargets() {
@@ -664,6 +706,13 @@ export class Ld2450ZoneMap extends LitElement {
     .trail,
     .target {
       pointer-events: none;
+    }
+    .trail circle.dim {
+      stroke-opacity: 0.15;
+    }
+    .trail circle.hot {
+      stroke-width: 3;
+      stroke-opacity: 1;
     }
     .trail circle {
       fill: none;

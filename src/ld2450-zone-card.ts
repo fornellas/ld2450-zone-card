@@ -3,7 +3,7 @@ import { DETECTION_AREA } from "./detection-area";
 import { discover, type DiscoveryOverrides, type Ld2450Device, type Zone } from "./discovery";
 import { insidePolygon, perimeter } from "./geometry";
 import type { EntityNameType, HomeAssistant, LovelaceCardConfig } from "./ha-types";
-import { type TrackPoint, ageGradient, formatMoment, timeRange } from "./age-color";
+import { type TrackPoint, ageFraction, ageGradient, formatMoment, timeRange } from "./age-color";
 import { fetchTargetHistory, toLocalInput } from "./history";
 import { fetchEntityIdParts } from "./naming";
 import {
@@ -73,6 +73,10 @@ const MAX_UNDO = 100;
 // Most target positions kept in the trail of each device. Each is an SVG circle, repainted whenever the map changes:
 // measured, 5k-10k keeps redraws around a frame or two on phones, while memory stays a few MB
 const MAX_TRAIL = 7000;
+// The share of the time on the color bar, each side of the pointer, whose positions stand out on the map
+const BAR_HOVER_REACH = 0.015;
+// Pointer movement along the color bar, in screen pixels, before pressing it becomes dragging a period
+const BRUSH_THRESHOLD_PX = 4;
 // How far back the History view starts
 const HISTORY_DEFAULT_MS = 60 * 60 * 1000;
 
@@ -146,6 +150,9 @@ export class Ld2450ZoneCard extends LitElement {
     _history: { state: true },
     _mode: { state: true },
     _recording: { state: true },
+    _brush: { state: true },
+    _barHover: { state: true },
+    _mapHover: { state: true },
     _past: { state: true },
     _historyStart: { state: true },
     _historyEnd: { state: true },
@@ -188,6 +195,13 @@ export class Ld2450ZoneCard extends LitElement {
    * Home Assistant recorded them in a period. Live on every load.
    */
   private _mode: TargetsMode = "live";
+  /** A period of the trail or history picked by dragging on the color bar. */
+  private _brush?: { from: number; to: number };
+  /** The time under the pointer on the color bar. */
+  private _barHover?: number;
+  /** The time of the position under the pointer on the map. */
+  private _mapHover?: number;
+  private _brushing?: { anchor: number; startX: number; moved: boolean };
   /** Whether the trail adds the positions seen. On each time the Trail view is opened. */
   private _recording = true;
   /** The recorded positions of the History view for a device, once loaded. */
@@ -472,6 +486,8 @@ export class Ld2450ZoneCard extends LitElement {
         .targets=${this._mode === "history" ? [] : targets}
         .trail=${this._track(device.id)}
         ?trailShown=${this._mode !== "live"}
+        .highlight=${this._highlight()}
+        @trail-hover=${(ev: CustomEvent<{ time?: number }>) => (this._mapHover = ev.detail.time)}
         .floorPlan=${floorPlan}
         ?editingFloorPlan=${target?.kind === "floorPlan"}
         .overlays=${this._userSettings?.overlays ?? {}}
@@ -872,19 +888,120 @@ export class Ld2450ZoneCard extends LitElement {
     `;
   }
 
-  /** The colors of the trail and history, from the oldest position to the newest, with the times they stand for. */
+  /** The oldest and newest times of the trail or history shown, and so the times the color bar stands for. */
+  private _scaleRange(): { from: number; to: number } | undefined {
+    return this._currentDevice === undefined ? undefined : timeRange(this._track(this._currentDevice));
+  }
+
+  /** What stands out on the map: the position under the pointer there, or the time under it on the color bar. */
+  private _highlight(): { from: number; to: number } | undefined {
+    const range = this._scaleRange();
+    if (range === undefined || this._mode === "live") return undefined;
+    if (this._mapHover !== undefined) return { from: this._mapHover, to: this._mapHover };
+    if (this._barHover !== undefined) {
+      const reach = (range.to - range.from) * BAR_HOVER_REACH;
+      return { from: this._barHover - reach, to: this._barHover + reach };
+    }
+    return this._brush;
+  }
+
+  private _resetHighlight(): void {
+    this._brush = undefined;
+    this._barHover = undefined;
+    this._mapHover = undefined;
+    this._brushing = undefined;
+  }
+
+  /** The time under a pointer on the color bar. */
+  private _barTime(ev: PointerEvent, range: { from: number; to: number }): number {
+    const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    const share = rect.width > 0 ? Math.min(Math.max((ev.clientX - rect.left) / rect.width, 0), 1) : 1;
+    return range.from + share * (range.to - range.from);
+  }
+
+  private _barDown(ev: PointerEvent): void {
+    const range = this._scaleRange();
+    if (range === undefined) return;
+    this._brushing = { anchor: this._barTime(ev, range), startX: ev.clientX, moved: false };
+    this._barHover = undefined;
+    // Keep receiving moves when the pointer leaves the bar. Synthetic events have no active pointer to capture.
+    try {
+      (ev.currentTarget as Element).setPointerCapture(ev.pointerId);
+    } catch {
+      // Nothing to capture
+    }
+  }
+
+  private _barMove(ev: PointerEvent): void {
+    const range = this._scaleRange();
+    if (range === undefined) return;
+    const time = this._barTime(ev, range);
+    const brushing = this._brushing;
+    if (brushing === undefined) {
+      if (ev.pointerType !== "touch") this._barHover = time;
+      return;
+    }
+    if (!brushing.moved && Math.abs(ev.clientX - brushing.startX) < BRUSH_THRESHOLD_PX) return;
+    brushing.moved = true;
+    this._brush = { from: Math.min(brushing.anchor, time), to: Math.max(brushing.anchor, time) };
+  }
+
+  private _barUp(ev: PointerEvent): void {
+    const brushing = this._brushing;
+    this._brushing = undefined;
+    (ev.currentTarget as Element).releasePointerCapture?.(ev.pointerId);
+    // A click without dragging clears what was picked
+    if (brushing !== undefined && !brushing.moved) this._brush = undefined;
+  }
+
+  /**
+   * The colors of the trail and history, from the oldest position to the newest, with the times they stand for. The
+   * bar picks times: hovering it shows the positions around that time on the map, dragging picks a period, and
+   * hovering a position on the map shows its time on the bar.
+   */
   private _renderAgeScale(points: TrackPoint[]) {
     const range = timeRange(points);
     if (range === undefined) return nothing;
+    const at = (time: number) => `${(ageFraction(time, range) * 100).toFixed(2)}%`;
+    const highlight = this._highlight();
+    const count =
+      highlight === undefined ? 0 : points.filter((p) => p.time >= highlight.from && p.time <= highlight.to).length;
+    const positions = (n: number) => `${n} position${n === 1 ? "" : "s"}`;
+    const tick = this._mapHover ?? this._barHover;
+    const readout =
+      this._mapHover !== undefined
+        ? formatMoment(this._mapHover, range)
+        : this._barHover !== undefined
+          ? `${formatMoment(this._barHover, range)} · ${positions(count)} around it`
+          : this._brush !== undefined
+            ? `${formatMoment(this._brush.from, range)} – ${formatMoment(this._brush.to, range)} · ${positions(count)}`
+            : "Hover or drag the bar to see when positions were seen.";
     return html`
-      <div
-        class="age-scale"
-        title="The color of each position is how long ago it was seen: cold for the oldest, warm for the newest"
-      >
+      <div class="age-scale">
         <span>${formatMoment(range.from, range)}</span>
-        <span class="bar" style="background: ${ageGradient()}"></span>
+        <div
+          class="age-track"
+          title="Hover to see the positions around a time, and drag to pick a period. Click to clear it."
+          @pointerdown=${this._barDown}
+          @pointermove=${this._barMove}
+          @pointerup=${this._barUp}
+          @pointercancel=${this._barUp}
+          @pointerleave=${() => (this._barHover = undefined)}
+        >
+          <span class="bar" style="background: ${ageGradient()}"></span>
+          ${
+            this._brush === undefined
+              ? nothing
+              : html`<span
+                  class="band"
+                  style="left: ${at(this._brush.from)}; width: calc(${at(this._brush.to)} - ${at(this._brush.from)})"
+                ></span>`
+          }
+          ${tick === undefined ? nothing : html`<span class="tick" style="left: ${at(tick)}"></span>`}
+        </div>
         <span>${formatMoment(range.to, range)}</span>
       </div>
+      <p class="age-readout">${readout}</p>
     `;
   }
 
@@ -1066,6 +1183,7 @@ export class Ld2450ZoneCard extends LitElement {
     } else {
       this._trails = { ...this._trails, [deviceId]: [] };
     }
+    this._resetHighlight();
     this.requestUpdate();
   }
 
@@ -1085,6 +1203,7 @@ export class Ld2450ZoneCard extends LitElement {
     if (mode === this._mode) return;
     // The trail starts afresh each time it's turned on
     if (this._mode === "trail") this._clearTrail();
+    this._resetHighlight();
     this._mode = mode;
     // The trail always starts recording
     this._recording = true;
@@ -1101,11 +1220,13 @@ export class Ld2450ZoneCard extends LitElement {
     if (edge === "start") this._historyStart = value;
     else this._historyEnd = value;
     this._past = undefined;
+    this._resetHighlight();
   }
 
   /** Load the positions of the History view's period for the shown device. */
   private _loadHistory(deviceId: string): void {
     const request = ++this._historyRequest;
+    this._resetHighlight();
     const start = new Date(this._historyStart);
     const end = new Date(this._historyEnd);
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
@@ -1613,10 +1734,45 @@ export class Ld2450ZoneCard extends LitElement {
       color: var(--secondary-text-color);
       font-variant-numeric: tabular-nums;
     }
-    .age-scale .bar {
+    .age-track {
+      position: relative;
+      flex: 1;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      cursor: crosshair;
+      /* Dragging along the bar picks a period, rather than scrolling the page */
+      touch-action: none;
+    }
+    .age-track .bar {
       flex: 1;
       height: 8px;
       border-radius: 4px;
+    }
+    .age-track .band {
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      border: 2px solid var(--primary-text-color);
+      border-radius: 4px;
+      box-sizing: border-box;
+      pointer-events: none;
+    }
+    .age-track .tick {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      margin-left: -1px;
+      background: var(--primary-text-color);
+      pointer-events: none;
+    }
+    .age-readout {
+      margin: 0;
+      min-height: 1.3em;
+      font-size: 0.85em;
+      color: var(--secondary-text-color);
+      font-variant-numeric: tabular-nums;
     }
     .history-range {
       display: flex;

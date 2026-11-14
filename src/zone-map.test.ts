@@ -167,6 +167,55 @@ describe("ld2450-zone-map fitting targets and trail", () => {
     expect(strokes).toEqual([ageColor(0), ageColor(0.5), ageColor(1)]);
   });
 
+  describe("picking times of the trail", () => {
+    async function withTrail() {
+      const map = document.createElement("ld2450-zone-map") as Ld2450ZoneMap;
+      map.overlays = { trackingRange: false, floorPlan: false };
+      map.trail = [
+        { x: 0, y: 1000, time: 1000 },
+        { x: 0, y: 1000, time: 1500 },
+        { x: 2000, y: 3000, time: 2000 },
+        { x: 3000, y: 1000, time: 3000 },
+      ];
+      map.trailShown = true;
+      document.body.appendChild(map);
+      await map.updateComplete;
+      const classes = () => [...map.shadowRoot!.querySelectorAll(".trail circle")].map((c) => c.getAttribute("class"));
+      return { map, classes };
+    }
+
+    it("makes the times it's given stand out, drawn over the rest", async () => {
+      const { map, classes } = await withTrail();
+      expect(classes()).toEqual(["", "", "", ""]);
+      map.highlight = { from: 1500, to: 2000 };
+      await map.updateComplete;
+      expect(classes()).toEqual(["dim", "dim", "hot", "hot"]);
+      const circles = [...map.shadowRoot!.querySelectorAll(".trail circle")];
+      // The ones that stand out are drawn last, in time order
+      expect(circles.map((c) => c.getAttribute("cx"))).toEqual(["0", "3000", "0", "2000"]);
+    });
+
+    it("tells the time of the position under the pointer, and when it's over none", async () => {
+      const { map } = await withTrail();
+      const times: (number | undefined)[] = [];
+      map.addEventListener("trail-hover", (ev) => times.push((ev as CustomEvent<{ time?: number }>).detail.time));
+      const svg = map.shadowRoot!.querySelector("svg")!;
+      const over = (point: { x: number; y: number }) => {
+        (map as unknown as { _roomPoint: () => { x: number; y: number } })._roomPoint = () => point;
+        svg.dispatchEvent(new MouseEvent("pointermove", { bubbles: true }));
+      };
+      over({ x: 20, y: 1010 });
+      // The same position again, and an overlapping older one: nothing new to tell
+      over({ x: 20, y: 1010 });
+      over({ x: 2000, y: 3000 });
+      over({ x: 1000, y: 2000 });
+      over({ x: 3010, y: 1000 });
+      svg.dispatchEvent(new MouseEvent("pointerleave"));
+      // The newest of the overlapping positions wins
+      expect(times).toEqual([1500, 2000, undefined, 3000, undefined]);
+    });
+  });
+
   it("zooms out to keep targets in view", async () => {
     const without = await width(() => undefined);
     const withTarget = await width((map) => (map.targets = [{ label: "1", name: "Target 1", point: far }]));
